@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Table } from './ui/Table';
 import { ActionBar } from './ui/ActionBar';
 import { OpponentInfo } from './ui/OpponentInfo';
+import { CoachPanel } from './ui/CoachPanel';
 import { useNarrow } from './ui/useNarrow';
 import { useSession } from './ui/useSession';
 import { HERO_SEAT, heroLegal, isHeroTurn } from './app/session';
@@ -16,7 +17,7 @@ export default function App() {
   const [mode, setMode] = useState<StackMode>('standard');
   const [info, setInfo] = useState<string | null>(null);
 
-  const { session, heroAct, nextHand, restart, botThinking } = useSession({
+  const { session, heroAct, nextHand, restart, botThinking, lastReview, handReviews } = useSession({
     heroName: HERO_NAME,
     stackMode: 'standard',
     smallBlind: 2,
@@ -113,13 +114,7 @@ export default function App() {
             </div>
           )}
 
-          <div className="coach-placeholder">
-            <span className="panel-label">Тренер</span>
-            <p>
-              Разбор каждого решения появится здесь на следующем этапе. Сейчас работают
-              стол, раздача и ставки — можно проверить, как всё играется.
-            </p>
-          </div>
+          <CoachPanel review={lastReview} handReviews={handReviews} />
         </aside>
       </div>
 

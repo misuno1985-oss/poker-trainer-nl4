@@ -5,6 +5,14 @@ import {
   dealNext, heroAct, isBotTurn, newSession, stepBot,
   type Session, type SessionConfig,
 } from '../app/session';
+import { captureSnapshot, evaluateDecision } from '../coach/index';
+import type { CoachVerdict } from '../coach/types';
+
+export interface ReviewedDecision {
+  street: string;
+  action: ActionRequest;
+  verdict: CoachVerdict;
+}
 
 /** Пауза между ходами ботов — чтобы за столом читалось, кто что сделал. */
 const BOT_DELAY_MS = 620;
@@ -17,6 +25,10 @@ export interface UseSession {
   restart: (mode: StackMode, pinned?: string) => void;
   /** Идёт анимация ходов ботов — кнопки героя в это время скрыты. */
   botThinking: boolean;
+  /** Разбор последнего решения. */
+  lastReview: ReviewedDecision | null;
+  /** Все решения текущей раздачи. */
+  handReviews: ReviewedDecision[];
 }
 
 export function useSession(initial: SessionConfig): UseSession {
@@ -24,6 +36,8 @@ export function useSession(initial: SessionConfig): UseSession {
   if (ref.current === null) ref.current = newSession(initial);
   const [, force] = useReducer((n: number) => n + 1, 0);
   const timer = useRef<number | null>(null);
+  const lastReview = useRef<ReviewedDecision | null>(null);
+  const handReviews = useRef<ReviewedDecision[]>([]);
 
   // Боты ходят по таймеру, по одному действию за раз.
   useEffect(() => {
@@ -48,12 +62,28 @@ export function useSession(initial: SessionConfig): UseSession {
   });
 
   const doHeroAct = useCallback((request: ActionRequest) => {
-    heroAct(ref.current!, request);
+    const session = ref.current!;
+    // Слепок снимается ДО действия: тренер должен видеть ровно то, что видел
+    // герой в момент нажатия кнопки, и ничего из появившегося позже.
+    const snap = captureSnapshot(session);
+    const street = session.state.street;
+    heroAct(session, request);
+    if (snap) {
+      const verdict = evaluateDecision(snap, {
+        kind: request.kind as 'fold' | 'check' | 'call' | 'bet' | 'raise',
+        total: request.total,
+      });
+      const review: ReviewedDecision = { street, action: request, verdict };
+      lastReview.current = review;
+      handReviews.current.push(review);
+    }
     force();
   }, []);
 
   const doNext = useCallback(() => {
     dealNext(ref.current!);
+    lastReview.current = null;
+    handReviews.current = [];
     force();
   }, []);
 
@@ -64,6 +94,8 @@ export function useSession(initial: SessionConfig): UseSession {
       pinned,
       seed: (Date.now() & 0x7fffffff) || 1,
     });
+    lastReview.current = null;
+    handReviews.current = [];
     force();
   }, [initial]);
 
@@ -73,5 +105,7 @@ export function useSession(initial: SessionConfig): UseSession {
     nextHand: doNext,
     restart,
     botThinking: isBotTurn(ref.current!),
+    lastReview: lastReview.current,
+    handReviews: handReviews.current,
   };
 }

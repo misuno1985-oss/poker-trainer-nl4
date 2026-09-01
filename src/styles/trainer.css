@@ -211,7 +211,7 @@
   color: var(--muted); display: block; margin-bottom: 6px;
 }
 
-.result-card, .coach-placeholder {
+.result-card, .coach-card {
   border-radius: 10px;
   background: rgba(0, 0, 0, 0.2);
   border: 1px solid var(--line);
@@ -225,7 +225,76 @@
 
 .turn-line { font-size: 16px; font-weight: 700; }
 .result-line { margin: 6px 0 12px; font-size: 13px; color: var(--muted); }
-.coach-placeholder p { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
+/* ---------------- тренер ---------------- */
+
+.coach-idle { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
+
+.coach-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.coach-head .panel-label { margin-bottom: 0; }
+.coach-score { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.coach-good { color: var(--good); }
+.coach-mid { color: var(--gold); }
+.coach-bad { color: var(--bad); }
+
+.coach-split {
+  display: flex; gap: 10px; margin-top: 4px;
+  font-size: 11px; color: var(--muted);
+}
+
+.coach-card p { margin: 8px 0 0; font-size: 13px; line-height: 1.5; }
+.coach-card p.coach-good { color: var(--good); }
+.coach-card p.coach-bad { color: var(--text); }
+
+.coach-better {
+  margin-top: 10px !important;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(78, 161, 255, 0.12);
+  border: 1px solid rgba(78, 161, 255, 0.3);
+  font-weight: 600;
+}
+.coach-better-label {
+  font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--accent); margin-right: 6px;
+}
+
+.leak-note {
+  margin-top: 10px; padding: 8px 10px;
+  border-left: 3px solid var(--gold);
+  background: rgba(240, 192, 90, 0.08);
+  border-radius: 0 8px 8px 0;
+}
+.leak-note.leak-quiet { border-left-color: var(--line); background: rgba(255,255,255,0.03); }
+.leak-note strong { font-size: 12px; }
+.leak-note p { margin: 4px 0 0 !important; font-size: 12px; color: var(--muted); }
+
+.why-btn { margin-top: 12px; }
+
+.why { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+.why-section { margin-bottom: 12px; }
+.why-section h4 {
+  margin: 0 0 5px; font-size: 11px; font-weight: 700;
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+}
+.why-kind {
+  font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 1px 6px; border-radius: 999px; font-weight: 600; flex: 0 0 auto;
+}
+.why-data .why-kind { background: rgba(63, 206, 135, 0.16); color: var(--good); }
+.why-model .why-kind { background: rgba(240, 192, 90, 0.16); color: var(--gold); }
+.why-math .why-kind { background: rgba(78, 161, 255, 0.16); color: var(--accent); }
+.why-section ul { margin: 0; padding-left: 16px; }
+.why-section li { font-size: 12px; line-height: 1.5; color: var(--muted); margin-bottom: 4px; }
+
+.hand-scores { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+.score-row { display: flex; gap: 5px; flex-wrap: wrap; }
+.score-chip {
+  font-size: 10.5px; font-weight: 700; padding: 2px 7px; border-radius: 999px;
+  background: rgba(255,255,255,0.06); border: 1px solid var(--line);
+}
+.score-chip.chip-good { color: var(--good); border-color: rgba(63,206,135,0.35); }
+.score-chip.chip-mid { color: var(--gold); border-color: rgba(240,192,90,0.35); }
+.score-chip.chip-bad { color: var(--bad); border-color: rgba(255,107,107,0.35); }
 
 .topbar-right { display: flex; align-items: center; gap: 20px; }
 .stack-modes { display: flex; align-items: center; gap: 8px; }
