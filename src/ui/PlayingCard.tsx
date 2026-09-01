@@ -1,4 +1,5 @@
-import { RANKS, SUIT_SYMBOLS, rankOf, suitOf, type Card } from '../engine/cards';
+import { SUIT_SYMBOLS, suitOf, type Card } from '../engine/cards';
+import { cardRankLabel, isTen } from './rankLabel';
 
 export type CardSize = 'sm' | 'md' | 'lg';
 
@@ -19,6 +20,8 @@ export function PlayingCard({ card, size = 'md', onClick, title, disabled }: Pro
     'card',
     `card-${size}`,
     empty ? 'card-empty' : red ? 'card-red' : 'card-black',
+    // «10» вдвое шире остальных подписей, и ей нужен свой размер.
+    !empty && isTen(card) ? 'card-ten' : '',
     onClick ? 'card-clickable' : '',
   ].join(' ');
 
@@ -26,7 +29,7 @@ export function PlayingCard({ card, size = 'md', onClick, title, disabled }: Pro
     <span className="card-plus">+</span>
   ) : (
     <>
-      <span className="card-rank">{RANKS[rankOf(card)]}</span>
+      <span className="card-rank">{cardRankLabel(card)}</span>
       <span className="card-suit">{SUIT_SYMBOLS[suit]}</span>
     </>
   );

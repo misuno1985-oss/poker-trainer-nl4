@@ -1,4 +1,5 @@
-import { RANKS, SUIT_SYMBOLS, rankOf, suitOf, type Card } from '../engine/cards';
+import { SUIT_SYMBOLS, suitOf, type Card } from '../engine/cards';
+import { cardRankLabel } from './rankLabel';
 
 /**
  * Карты текстом: «J♠ 3♥».
@@ -14,7 +15,7 @@ export function CardText({ cards }: { cards: readonly Card[] }) {
     <>
       {cards.map((c, i) => (
         <span key={i} className="card-text">
-          {RANKS[rankOf(c)]}
+          {cardRankLabel(c)}
           <span className={RED.has(suitOf(c)) ? 'suit suit-red' : 'suit'}>
             {SUIT_SYMBOLS[suitOf(c)]}
             {'︎'}

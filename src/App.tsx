@@ -5,6 +5,8 @@ import { OpponentInfo } from './ui/OpponentInfo';
 import { CoachPanel } from './ui/CoachPanel';
 import { HandAnalysis } from './ui/HandAnalysis';
 import { MistakesScreen, ProgressScreen, StartScreen, SummaryScreen } from './ui/Screens';
+import { SoundToggle } from './ui/SoundToggle';
+import { useTableSounds } from './ui/useTableSounds';
 import { useNarrow } from './ui/useNarrow';
 import { useTrainer } from './ui/useTrainer';
 import { HERO_SEAT, heroLegal, isHeroTurn, type Session } from './app/session';
@@ -19,6 +21,9 @@ export default function App() {
   const [info, setInfo] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState(false);
   const t = useTrainer();
+  // Звук слушает протокол раздачи, а не кнопки: ходы соперников и
+  // переигрывание звучат так же, как свои ходы.
+  useTableSounds(t.session, t.screen === 'table');
 
   const close = () => setAnalysis(false);
 
@@ -99,6 +104,7 @@ export default function App() {
 
         <div className="topbar-right">
           {t.isReplay && <span className="replay-badge">ПЕРЕИГРЫВАНИЕ · в статистику не идёт</span>}
+          <SoundToggle />
           <div className="bankroll">
             <span className="hero-picker-label">Оценка</span>
             <strong className={t.totals.decisions === 0 ? '' : t.totals.score >= 7.5 ? 'good' : t.totals.score >= 5.5 ? '' : 'bad'}>
@@ -243,6 +249,7 @@ function Shell({ children }: { children: React.ReactNode }) {
             <p>$0.02 / $0.04 · 6-max · тренажёр с разбором каждого решения</p>
           </div>
         </div>
+        <div className="topbar-right"><SoundToggle /></div>
       </header>
       <div className="layout layout-sheet">{children}</div>
     </div>
