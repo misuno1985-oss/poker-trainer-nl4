@@ -64,13 +64,18 @@ export function buildScores(
   const actionScore = scoreFromGap(actionGap);
 
   let sizingScore: number | null = null;
-  if ((chosen.kind === 'bet' || chosen.kind === 'raise') && bestOfSameKind) {
+  // Оценивать размер имеет смысл, только если есть с чем сравнивать. Один
+  // уцелевший вариант этого типа дал бы бессмысленную десятку и завысил итог.
+  if ((chosen.kind === 'bet' || chosen.kind === 'raise') && bestOfSameKind && sameKind.length >= 2) {
     const sizingGap = (bestOfSameKind.ev - chosen.ev) / norm;
     sizingScore = scoreFromGap(sizingGap);
   }
 
+  // Правильное действие не должно получать двойку из-за размера — но и
+  // удачный размер не должен вытягивать заведомо неверный выбор. Поэтому
+  // размер учитывается, только когда сам выбор хотя бы приемлем.
   const score =
-    sizingScore === null
+    sizingScore === null || actionScore < 5
       ? actionScore
       : Math.round((actionScore * 0.65 + sizingScore * 0.35) * 10) / 10;
 

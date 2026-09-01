@@ -11,7 +11,7 @@
 
 import { legalActions } from '../game/betting';
 import { totalPot, type Position } from '../game/types';
-import { PROFILE_BY_NAME } from '../bots/profiles';
+import { profileFor } from '../bots/profiles';
 import type { Session } from '../app/session';
 import { HERO_SEAT } from '../app/session';
 import type { DecisionSnapshot, OpponentView } from './types';
@@ -51,7 +51,7 @@ export function captureSnapshot(
       seat: p.seat,
       name: p.name,
       // Профиль — это измеренная статистика. Карт в нём нет.
-      profile: PROFILE_BY_NAME[p.name] ?? PROFILE_BY_NAME['DuhaMetelkin'],
+      profile: profileFor(p.name),
       position: p.position,
       stack: p.stack,
       streetCommit: p.streetCommit,
@@ -67,9 +67,17 @@ export function captureSnapshot(
     ...(opponents.every((o) => o.allIn) ? [hero.stack] : []),
   );
 
+  const liveCommit = hero.handCommit + opponents.reduce((s, o) => s + o.handCommit, 0);
+
   return {
     handNumber: session.handNumber,
     street: state.street,
+    heroSeat,
+    button: state.button,
+    seatCount: state.players.length,
+    currentBet: state.currentBet,
+    lastRaiseSize: state.lastRaiseSize,
+    deadMoney: Math.max(0, totalPot(state) - liveCommit),
     heroCards: [hero.cards[0], hero.cards[1]],
     board: state.board.slice(),
     heroPosition: hero.position,

@@ -437,3 +437,60 @@ export const PROFILE_BY_NAME: Record<string, BotProfile> = Object.fromEntries(
 
 /** Выборка, начиная с которой частоту можно считать измеренной, а не оценённой. */
 export const RELIABLE_SAMPLE = 60;
+
+/**
+ * Профиль для игрока, которого нет в двадцатке: слишком мало раздач в базе.
+ *
+ * Раньше на его место молча подставлялся первый попавшийся профиль, и тренер
+ * писал «prachka2, 1954 раздач», хотя 1954 — это выборка DuhaMetelkin, а у
+ * prachka2 их тридцать. Теперь такой игрок получает честное усреднение по всем
+ * измеренным профилям, взвешенное по объёму выборки, и `hands: 0` — признак
+ * того, что о нём лично ничего не известно.
+ */
+export const UNKNOWN_PROFILE: BotProfile = (() => {
+  const total = PROFILES.reduce((s, p) => s + p.hands, 0);
+  const avg = (pick: (p: BotProfile) => number) =>
+    PROFILES.reduce((s, p) => s + pick(p) * p.hands, 0) / total;
+  const street = (pick: (p: BotProfile) => StreetStats): StreetStats => ({
+    betFirst: avg((p) => pick(p).betFirst),
+    foldVsBet: avg((p) => pick(p).foldVsBet),
+    callVsBet: avg((p) => pick(p).callVsBet),
+    raiseVsBet: avg((p) => pick(p).raiseVsBet),
+    sizePct: avg((p) => pick(p).sizePct),
+  });
+  const positions = ['UTG', 'HJ', 'CO', 'BTN', 'SB', 'BB'] as const;
+  const openBy = Object.fromEntries(
+    positions.map((pos) => [pos, avg((p) => p.openBy[pos])]),
+  ) as BotProfile['openBy'];
+
+  return {
+    name: 'неизвестный игрок',
+    hands: 0,
+    archetype: 'tight-aggressive',
+    vpip: avg((p) => p.vpip),
+    pfr: avg((p) => p.pfr),
+    openBy,
+    openSizeBB: avg((p) => p.openSizeBB),
+    limp: avg((p) => p.limp),
+    threeBet: avg((p) => p.threeBet),
+    threeBetSizeBB: avg((p) => p.threeBetSizeBB),
+    coldCall: avg((p) => p.coldCall),
+    defendCall: avg((p) => p.defendCall),
+    defendThreeBet: avg((p) => p.defendThreeBet),
+    foldTo3Bet: avg((p) => p.foldTo3Bet),
+    call3Bet: avg((p) => p.call3Bet),
+    fourBet: avg((p) => p.fourBet),
+    cbet: avg((p) => p.cbet),
+    wtsd: avg((p) => p.wtsd),
+    wsd: avg((p) => p.wsd),
+    flop: street((p) => p.flop),
+    turn: street((p) => p.turn),
+    river: street((p) => p.river),
+    samples: { open: 0, threeBet: 0, vs3bet: 0, flops: 0, cbet: 0, flopVsBet: 0, turnVsBet: 0, riverVsBet: 0 },
+  };
+})();
+
+/** Профиль по нику; для незнакомого игрока — честное «ничего не знаем». */
+export function profileFor(name: string): BotProfile {
+  return PROFILE_BY_NAME[name] ?? UNKNOWN_PROFILE;
+}

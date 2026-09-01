@@ -157,6 +157,11 @@ export interface BotContext {
   /** Профиль того, кто поставил (если известен). */
   bettor?: BotProfile;
   rng: Rng;
+  /**
+   * Если задано — силу руки считать по выборке такого размера вместо полного
+   * перебора. Используется внутри доигрывания раздачи ради скорости.
+   */
+  fastSamples?: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -226,7 +231,11 @@ function fourBetSize(ctx: BotContext): number {
 
 function decidePostflop(ctx: BotContext): ActionRequest {
   const { knobs, legal, rng } = ctx;
-  const s = analyse(ctx.cards, ctx.board);
+  const s = analyse(
+    ctx.cards,
+    ctx.board,
+    ctx.fastSamples ? { count: ctx.fastSamples, rng } : undefined,
+  );
   const k = ctx.street === 'flop' ? knobs.flop : ctx.street === 'turn' ? knobs.turn : knobs.river;
   const stats =
     ctx.street === 'flop' ? ctx.profile.flop : ctx.street === 'turn' ? ctx.profile.turn : ctx.profile.river;

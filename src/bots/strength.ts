@@ -154,10 +154,21 @@ export function findDraws(hole: readonly Card[], board: readonly Card[]): Draws 
   return { flushDraw, backdoorFlush, openEnded, gutshot, outs };
 }
 
-export function analyse(hole: readonly Card[], board: readonly Card[]): Strength {
+/**
+ * @param samples если задано — сила руки считается по случайной выборке, а не
+ * полным перебором. Нужно внутри доигрывания раздачи, где полная оценка
+ * стоила бы тысячи переборов на один прогон.
+ */
+export function analyse(
+  hole: readonly Card[],
+  board: readonly Card[],
+  samples?: { count: number; rng: () => number },
+): Strength {
   const value = evaluate([hole[0], hole[1], ...board]);
   const category = categoryOf(value);
-  const percentile = handPercentile(hole, board);
+  const percentile = samples
+    ? handPercentileFast(hole, board, samples.count, samples.rng)
+    : handPercentile(hole, board);
   const draws = findDraws(hole, board);
 
   const boardValue = board.length >= 5 ? evaluate(board as Card[]) : -1;

@@ -14,7 +14,7 @@ import type { Action, HandState, Position } from '../game/types';
 import { buildContext } from '../bots/sim';
 import { decide } from '../bots/decide';
 import { knobsFor } from '../bots/index';
-import { PROFILES, PROFILE_BY_NAME, type BotProfile } from '../bots/profiles';
+import { PROFILES, PROFILE_BY_NAME, profileFor, type BotProfile } from '../bots/profiles';
 
 export const HERO_SEAT = 0;
 export const SEATS = 6;
@@ -167,7 +167,7 @@ export function botChoice(session: Session): ActionRequest | null {
  * ставку. Пока герой не имеет собственной модели, он выглядит для них как
  * средний аккуратный регуляр.
  */
-const HERO_STUB: BotProfile = PROFILE_BY_NAME['DuhaMetelkin'];
+const HERO_STUB: BotProfile = profileFor('DuhaMetelkin');
 
 export function stepBot(session: Session): Session {
   const request = botChoice(session);

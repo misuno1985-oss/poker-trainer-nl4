@@ -155,9 +155,11 @@ it('раздача KQ: полный внутренний расчёт', () => {
       const eq = equityVsRanges(snap.heroCards, board, [r2], 1);
       console.log(`\n     ДОЛЯ ГЕРОЯ против этого диапазона: ${pct(eq)}`);
 
-      const analysis = analyse(snap);
-      console.log(`\n     ОЖИДАЕМЫЙ РЕЗУЛЬТАТ ВАРИАНТОВ`);
-      for (const c of analysis.candidates.slice(0, 6)) {
+      const verdict = evaluateDecision(snap, heroDecisions[heroDecisions.length - 1].action as never);
+      const rolled = verdict.ranked.some((c) => c.detail.rollout);
+      console.log(`\n     ОЖИДАЕМЫЙ РЕЗУЛЬТАТ ВАРИАНТОВ` +
+        (rolled ? `  (уточнено доигрыванием, ${verdict.ranked.find((c) => c.detail.rollout)!.detail.rollout!.sims} прогонов)` : ''));
+      for (const c of verdict.ranked.slice(0, 6)) {
         const d = c.detail;
         const extra =
           d.foldEquity !== undefined
@@ -169,7 +171,6 @@ it('раздача KQ: полный внутренний расчёт', () => {
         console.log(`       ${actionLabel(c).padEnd(18)} ${money(Math.round(c.ev)).padStart(7)}${extra}`);
       }
 
-      const verdict = evaluateDecision(snap, heroDecisions[heroDecisions.length - 1].action as never);
       console.log(`\n     ВЕРДИКТ по фактическому ходу (${actionLabel(verdict.chosen)})`);
       console.log(`       оценка ${verdict.score}/10  (выбор ${verdict.actionScore}` +
         (verdict.sizingScore !== null ? `, размер ${verdict.sizingScore}` : '') + ')');

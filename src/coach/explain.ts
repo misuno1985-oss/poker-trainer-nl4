@@ -188,6 +188,7 @@ export function buildWhy(
   chosen: Candidate,
   scores: Scores,
   confidence: Confidence,
+  rolledOut = false,
 ): WhySection[] {
   const out: WhySection[] = [];
 
@@ -202,6 +203,14 @@ export function buildWhy(
       `Доложить ${money(snap.legal.toCall)} — значит выигрывать хотя бы ${pct(odds)} случаев, ` +
         'чтобы колл не терял деньги.',
     );
+    if (snap.street !== 'river') {
+      const r = snap.heroInPosition ? 0.95 : 0.86;
+      mathLines.push(
+        `Раздача на этом не заканчивается, поэтому свою долю ты реализуешь не полностью: ` +
+          `${snap.heroInPosition ? 'в позиции' : 'без позиции'} примерно ${pct(r)} от неё. ` +
+          'Из-за этого сравнение с шансами банка чуть строже, чем «доля больше процента — значит колл».',
+      );
+    }
   }
   if (chosen.detail.foldEquity !== undefined) {
     mathLines.push(
@@ -227,10 +236,19 @@ export function buildWhy(
       : snap.street === 'river' ? p.samples.riverVsBet
       : p.samples.open;
 
-    const dataLines: string[] = [
-      `Играет примерно ${pct(p.vpip)} рук, повышает до флопа в ${pct(p.pfr)}. Выборка — ${p.hands} раздач.`,
-    ];
-    if (snap.street !== 'preflop' && sample >= 20) {
+    const dataLines: string[] = p.hands === 0
+      ? [
+          'Этого игрока в базе почти нет — статистики по нему не существует. ' +
+            'Вместо неё берётся усреднённый профиль по всем измеренным соперникам, ' +
+            'поэтому любые числа ниже относятся к «среднему игроку», а не к нему лично.',
+        ]
+      : [
+          `Играет примерно ${pct(p.vpip)} рук, повышает до флопа в ${pct(p.pfr)}. ` +
+            `Выборка — ${p.hands} раздач.`,
+        ];
+    if (p.hands === 0) {
+      // Нечего добавлять: конкретных наблюдений за ним нет.
+    } else if (snap.street !== 'preflop' && sample >= 20) {
       dataLines.push(
         `На этой улице выбрасывал на ставку примерно в ${pct(stats.foldVsBet)} случаев ` +
           `(${sample} наблюдений).`,
@@ -268,7 +286,11 @@ export function buildWhy(
     return `${actionLabel(c)} — ожидаемый результат примерно ${money(Math.round(c.ev))}${mark}`;
   });
   altLines.push(
-    'Числа приблизительные: это не солвер, а оценка по доле, цене колла и статистике соперника.',
+    rolledOut
+      ? `Решение непростое, поэтому я дополнительно доиграл раздачу ${chosen.detail.rollout?.sims ?? 0} раз ` +
+        'с разными возможными картами соперника и разными тёрнами и риверами. Числа выше — ' +
+        'средний итог таких доигрываний, они приблизительные.'
+      : 'Числа приблизительные: это не солвер, а оценка по доле, цене колла и статистике соперника.',
   );
   out.push({ title: 'Что дают разные варианты', kind: 'math', lines: altLines });
 

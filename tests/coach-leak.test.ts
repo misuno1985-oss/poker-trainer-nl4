@@ -124,6 +124,37 @@ describe('тренер не видит закрытых карт', () => {
     }
   });
 
+  it('не подсматривает и при доигрывании раздачи', () => {
+    // Флоп с крупным банком: здесь тренер запускает Монте-Карло. Карты
+    // соперников для доигрывания должны семплироваться из диапазона, а не
+    // браться настоящие.
+    const flopScenario: Scenario = {
+      ...BASE,
+      board: 'Ac7h2s',
+      script: [
+        { kind: 'fold' }, { kind: 'fold' }, { kind: 'fold' },
+        { kind: 'raise', total: 30 }, { kind: 'fold' }, { kind: 'call' },
+        { kind: 'bet', total: 40 },
+      ],
+    };
+    const variants = [
+      { 1: '7c2d', 2: '9s8s', 3: 'QhJh', 4: '5c5d', 5: 'Tc4h' },
+      { 1: 'KsKc', 2: 'AsAd', 3: '6h6d', 4: 'JdTd', 5: '4s3s' },
+      { 1: '2h3h', 2: 'QsQd', 3: 'Ts9c', 4: '8h7d', 5: 'Jc6c' },
+    ];
+    const verdicts = variants.map((villainCards) => {
+      const state = buildDecision({ ...flopScenario, villainCards });
+      const snap = captureSnapshot(fakeSession(state))!;
+      return evaluateDecision(snap, { kind: 'call' });
+    });
+    // Доигрывание должно было включиться — иначе тест ничего не проверяет.
+    expect(verdicts[0].ranked.some((c) => c.detail.rollout)).toBe(true);
+    const first = JSON.stringify(verdicts[0]);
+    for (let i = 1; i < verdicts.length; i++) {
+      expect(JSON.stringify(verdicts[i]), `вариант ${i}`).toBe(first);
+    }
+  });
+
   it('меняет вердикт, когда меняются КАРТЫ ГЕРОЯ — иначе он ничего не считает', () => {
     const strong = buildDecision({ ...BASE, heroCards: 'AhKd' });
     const weak = buildDecision({
@@ -142,9 +173,12 @@ describe('архитектурная граница', () => {
   const dir = new URL('../src/coach/', import.meta.url);
   const files = readdirSync(dir).filter((f: string) => f.endsWith('.ts'));
 
-  it('только snapshot.ts знает про движок раздачи и сессию', () => {
+  it('только snapshot.ts и rollout.ts знают про движок раздачи', () => {
+    // rollout.ts обязан уметь доигрывать раздачу, поэтому движок ему нужен.
+    // Защита здесь не в запрете импорта, а в тесте подмены скрытых карт ниже:
+    // карты соперников он получает только семплированием из диапазона.
     for (const file of files) {
-      if (file === 'snapshot.ts') continue;
+      if (file === 'snapshot.ts' || file === 'rollout.ts') continue;
       const src = readFileSync(new URL(file, dir), 'utf8');
       const imports = [...src.matchAll(/^import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+'([^']+)'/gm)];
       for (const [, names, from] of imports) {

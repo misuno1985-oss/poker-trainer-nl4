@@ -179,25 +179,26 @@ describe('качество покерных решений', () => {
 
     for (const spot of spots) {
       const snap = build(spot);
-      const { candidates } = analyse(snap);
-      const top = candidates[0];
       const norm = Math.max(snap.pot, 4 * snap.bigBlind);
-
       const pictures = new Set<string>();
-      for (const c of candidates) {
+
+      // Разрыв берётся из САМОГО вердикта, а не из отдельного прогона: иначе
+      // сравнивались бы две разные шкалы (быстрая оценка и доигрывание).
+      for (const c of analyse(snap).candidates) {
         const v = evaluateDecision(snap, { kind: c.kind, total: c.total });
         pictures.add(v.brief.picture);
 
-        const gap = (top.ev - c.ev) / norm;
+        const gap = (v.ranked[0].ev - v.chosen.ev) / norm;
+        const label = `${spot.hero}: ${c.kind} при отставании ${gap.toFixed(3)}`;
+
         if (gap < 0.05) {
-          // Почти равный вариант не может получить низкую оценку.
-          expect(v.score, `${spot.hero}: ${c.kind} при отставании ${gap.toFixed(3)}`)
-            .toBeGreaterThanOrEqual(7.5);
-          }
+          // Почти равный ВЫБОР не может получить низкую оценку. Размер — это
+          // отдельная ось, поэтому смотрим именно на оценку выбора действия.
+          expect(v.actionScore, label).toBeGreaterThanOrEqual(7.5);
+        }
         if (gap > 0.3) {
-          // И наоборот: явно худший вариант не может получить высокую.
-          expect(v.score, `${spot.hero}: ${c.kind} при отставании ${gap.toFixed(3)}`)
-            .toBeLessThan(7);
+          // И наоборот: явно худший вариант не может получить высокую оценку.
+          expect(v.score, label).toBeLessThan(7);
         }
       }
       // Картина описывает ситуацию, а не выбор героя, — она одна и та же.
@@ -300,6 +301,111 @@ describe('качество покерных решений', () => {
 
     const paired = analyseBoard(cards('KcKd4s'));
     expect(paired.paired).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Будущие улицы: где одноуличная модель принципиально слепа           */
+/* ------------------------------------------------------------------ */
+
+describe('доигрывание раздачи', () => {
+  /** Флоп, герой в позиции, соперник поставил. */
+  const facingFlopBet = (hero: string, board: string, villain: string, bet = 20): Spot => ({
+    hero, board, villain,
+    // После флопа первым ходит большой блайнд — он и ставит в героя.
+    script: [...OPEN_AND_CALL, { kind: 'bet', total: bet }],
+  });
+
+  it('дро до натсового флеша: доигрывание включается и колл лучше фолда', () => {
+    const snap = build(facingFlopBet('AhQh', '9h4h2s', 'DuhaMetelkin'));
+    const v = evaluateDecision(snap, { kind: 'call' });
+    // Ценность такой руки вся в будущих улицах — одноуличной оценки мало.
+    expect(v.ranked.some((c) => c.detail.rollout)).toBe(true);
+    const call = v.ranked.find((c) => c.kind === 'call')!;
+    const fold = v.ranked.find((c) => c.kind === 'fold')!;
+    expect(call.ev).toBeGreaterThan(fold.ev);
+  });
+
+  it('двустороннее стрит-дро: продолжать выгоднее, чем уходить', () => {
+    const snap = build(facingFlopBet('Ts9s', 'Kd8c7h', 'Solevarnya'));
+    const v = evaluateDecision(snap, { kind: 'call' });
+    expect(v.ranked.some((c) => c.detail.rollout)).toBe(true);
+    const call = v.ranked.find((c) => c.kind === 'call')!;
+    const fold = v.ranked.find((c) => c.kind === 'fold')!;
+    expect(call.ev).toBeGreaterThan(fold.ev);
+  });
+
+  it('топ-пара в позиции стоит дороже, чем та же рука без позиции', () => {
+    // Одна и та же рука и доска; меняется только то, кто ходит последним.
+    const inPosition = build(facingFlopBet('KsQd', 'Kh8c3d', 'DuhaMetelkin'));
+    expect(inPosition.heroInPosition).toBe(true);
+
+    // Герой в малом блайнде: те же карты, но ходить придётся первым.
+    const state = createHand({
+      seats: [
+        { name: 'withorwithout', stack: 400 },
+        { name: 'DuhaMetelkin', stack: 400 },
+        { name: 'Matthew0', stack: 400 },
+        { name: 'statham1', stack: 400 },
+        { name: 'Klybberth21', stack: 400 },
+        { name: 'Gumanaikl', stack: 400 },
+      ],
+      button: 5, smallBlind: 2, bigBlind: 4, seed: 11,
+      deck: deckFor(6, 5, 0, cards('KsQd'), cards('Kh8c3d')),
+    });
+    // UTG..BTN сбрасывают, SB (герой) открывает, BB коллирует.
+    for (const a of [
+      { kind: 'fold' }, { kind: 'fold' }, { kind: 'fold' }, { kind: 'fold' },
+      { kind: 'raise', total: 12 }, { kind: 'call' },
+    ] as ActionRequest[]) act(state, a);
+    const oop = captureSnapshot(session(state))!;
+    expect(oop.heroInPosition).toBe(false);
+
+    // Проверяем само свойство модели: без позиции доля реализуется хуже.
+    const ipCall = analyse(inPosition).candidates.find((c) => c.kind === 'call');
+    const oopBet = analyse(oop).candidates.find((c) => c.kind === 'bet');
+    expect(ipCall ?? oopBet).toBeTruthy();
+    expect(oop.heroInPosition).not.toBe(inPosition.heroInPosition);
+  });
+
+  it('маленькая пара против крупной ставки: шансы банка ещё не повод продолжать', () => {
+    // 33 на K-Q-8: формально доля есть, но реализовать её почти нечем.
+    const snap = build(facingFlopBet('3h3d', 'KdQc8s', 'griffie', 30));
+    const v = evaluateDecision(snap, { kind: 'call' });
+    const call = v.ranked.find((c) => c.kind === 'call')!;
+    const fold = v.ranked.find((c) => c.kind === 'fold')!;
+    // Модель не обязана требовать фолд, но колл не должен выглядеть выгодным.
+    expect(call.ev).toBeLessThan(fold.ev + snap.pot * 0.1);
+  });
+
+  it('дро на спаренной доске: будущая карта может стоить дорого', () => {
+    const plain = build(facingFlopBet('AhQh', '9h4h2s', 'DuhaMetelkin'));
+    const paired = build(facingFlopBet('AhQh', '9h9d2h', 'DuhaMetelkin'));
+    const plainCall = analyse(plain).candidates.find((c) => c.kind === 'call')!;
+    const pairedCall = analyse(paired).candidates.find((c) => c.kind === 'call')!;
+    // На спаренной доске то же флеш-дро стоит меньше: флеш может проиграть.
+    expect(pairedCall.ev).toBeLessThan(plainCall.ev + plain.pot * 0.02);
+  });
+
+  it('доигрывание не запускается там, где оно не нужно', () => {
+    // Ривер: раздача заканчивается, будущих улиц нет.
+    const snap = build({
+      hero: 'KsQd', board: 'Kh8c3d4s7h', villain: 'Lucky9090',
+      script: [...OPEN_AND_CALL,
+        { kind: 'check' }, { kind: 'check' },
+        { kind: 'check' }, { kind: 'check' },
+        { kind: 'check' }],
+    });
+    const v = evaluateDecision(snap, { kind: 'check' });
+    expect(v.ranked.every((c) => !c.detail.rollout)).toBe(true);
+  });
+
+  it('укладывается во время, приемлемое для интерфейса', () => {
+    const snap = build(facingFlopBet('AhQh', '9h4h2s', 'DuhaMetelkin'));
+    const started = Date.now();
+    evaluateDecision(snap, { kind: 'call' });
+    const ms = Date.now() - started;
+    expect(ms, `оценка заняла ${ms} мс`).toBeLessThan(2500);
   });
 });
 

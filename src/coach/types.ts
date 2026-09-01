@@ -58,6 +58,20 @@ export interface DecisionSnapshot {
   effectiveStack: number;
   /** Герой в позиции (ходит последним) на этой улице. */
   heroInPosition: boolean;
+
+  /* --- публичные детали стола, нужные для доигрывания раздачи --- */
+  /** Место героя. */
+  heroSeat: number;
+  /** Место баттона. */
+  button: number;
+  /** Сколько мест за столом. */
+  seatCount: number;
+  /** Текущая наибольшая ставка на улице. */
+  currentBet: number;
+  /** Минимальный шаг повышения. */
+  lastRaiseSize: number;
+  /** Деньги в банке от уже сбросивших игроков. */
+  deadMoney: number;
 }
 
 /** Действие-кандидат, которое тренер взвешивает. */
@@ -87,6 +101,8 @@ export interface EvDetail {
   /** Цена колла и требуемая доля. */
   toCall?: number;
   potOdds?: number;
+  /** Заполнено, если число уточнено доигрыванием раздачи. */
+  rollout?: { sims: number; stdErr: number };
   /** Пояснение, если число получено эвристикой, а не расчётом. */
   note?: string;
 }
