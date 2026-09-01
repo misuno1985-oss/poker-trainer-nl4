@@ -1,7 +1,10 @@
+import { useEffect, useRef, useState } from 'react';
 import { PlayingCard, CardBack } from './PlayingCard';
+import { BetMarker } from './BetMarker';
+import { TABLE_CENTER, betSpots, type BetSpot } from './betMarkers';
 import { money } from '../game/stacks';
 import { totalPot } from '../game/types';
-import { seatViews, type Session, type SeatView } from '../app/session';
+import { HERO_SEAT, seatViews, type Session, type SeatView } from '../app/session';
 
 /**
  * Овальный стол на шесть мест. Герой всегда внизу по центру, остальные идут
@@ -40,6 +43,12 @@ export function Table({ session, narrow, showAllCards, onInfo }: Props) {
   const views = seatViews(session);
   const coords = narrow ? SEAT_COORDS_NARROW : SEAT_COORDS;
   const pot = totalPot(state);
+  const spots = betSpots(views, coords, narrow, state.bigBlind);
+  // У героя подпись действия стоит НАД картами, то есть ровно там, куда на
+  // узком экране приходит его маркер. Дублировать нечего: маркер говорит то же
+  // самое и точнее, поэтому подпись героя уступает ему место.
+  const heroHasMarker = spots.some((s2) => s2.seat === HERO_SEAT);
+  const flying = useCollectAnimation(spots, state.street, session.handNumber);
   const streetLabel = { preflop: 'PREFLOP', flop: 'FLOP', turn: 'TURN', river: 'RIVER', showdown: 'SHOWDOWN' }[state.street];
 
   return (
@@ -69,6 +78,15 @@ export function Table({ session, narrow, showAllCards, onInfo }: Props) {
         </div>
       </div>
 
+      {spots.map((s2) => (
+        <BetMarker key={`bet-${s2.seat}`} spot={s2} />
+      ))}
+
+      {/* Уехавшие в банк фишки прошлой улицы: только показать, что они ушли. */}
+      {flying.map((s2) => (
+        <BetMarker key={`fly-${s2.seat}`} spot={s2} flying />
+      ))}
+
       {views.map((v) => (
         <SeatBox
           key={v.seat}
@@ -78,6 +96,7 @@ export function Table({ session, narrow, showAllCards, onInfo }: Props) {
           narrow={narrow}
           reveal={showAllCards || v.isHero}
           bigBlind={state.bigBlind}
+          hideAction={narrow && v.isHero && heroHasMarker}
           onInfo={onInfo}
         />
       ))}
@@ -92,10 +111,11 @@ interface SeatProps {
   narrow: boolean;
   reveal: boolean;
   bigBlind: number;
+  hideAction: boolean;
   onInfo: (name: string) => void;
 }
 
-function SeatBox({ view, x, y, narrow, reveal, onInfo }: SeatProps) {
+function SeatBox({ view, x, y, narrow, reveal, hideAction, onInfo }: SeatProps) {
   const classes = [
     'seat',
     view.isHero ? 'seat-hero' : '',
@@ -107,7 +127,7 @@ function SeatBox({ view, x, y, narrow, reveal, onInfo }: SeatProps) {
 
   // Подпись действия у героя стоит НАД картами (он внизу экрана), у остальных —
   // под табличкой. Так она всегда смотрит в сторону центра стола.
-  const label = view.lastAction && !view.isToAct && (
+  const label = view.lastAction && !view.isToAct && !hideAction && (
     <div className={`seat-action ${view.lastAction.startsWith('FOLD') ? 'act-fold' : ''}`}>
       {view.lastAction}
     </div>
@@ -131,7 +151,6 @@ function SeatBox({ view, x, y, narrow, reveal, onInfo }: SeatProps) {
             </>
           )
         ) : null}
-        {view.committed > 0 && <span className="seat-bet">{money(view.committed)}</span>}
       </div>
 
       <div className="seat-plate">
@@ -160,4 +179,55 @@ function SeatBox({ view, x, y, narrow, reveal, onInfo }: SeatProps) {
       {!view.isHero && label}
     </div>
   );
+}
+
+/**
+ * Короткий переезд фишек в центр при смене улицы.
+ *
+ * Только оформление: банк в `totalPot` и так считается по `handCommit`, то есть
+ * уже включает ставки текущей улицы, и в момент перехода его число не меняется.
+ * Анимация показывает, куда девались фишки, и ничего не пересчитывает.
+ */
+function useCollectAnimation(spots: BetSpot[], street: string, handNumber: number): BetSpot[] {
+  const [flying, setFlying] = useState<BetSpot[]>([]);
+  const lastStreet = useRef(street);
+  const lastHand = useRef(handNumber);
+  const lastSpots = useRef<BetSpot[]>(spots);
+
+  useEffect(() => {
+    const streetChanged = lastStreet.current !== street;
+    const newHand = lastHand.current !== handNumber;
+    const from = lastSpots.current;
+    lastStreet.current = street;
+    lastHand.current = handNumber;
+
+    // Новая раздача — не переезд, а обнуление: собирать нечего.
+    if (!streetChanged || newHand || from.length === 0) {
+      setFlying([]);
+      return;
+    }
+
+    setFlying(from.map((s) => ({ ...s })));
+    // Второй кадр нужен, чтобы браузер успел отрисовать фишки на месте и
+    // только потом поехал: без этого перехода не видно.
+    const raf = requestAnimationFrame(() => {
+      setFlying((cur) => cur.map((s) => ({ ...s, x: TABLE_CENTER.x, y: TABLE_CENTER.y })));
+    });
+    const timer = window.setTimeout(() => setFlying([]), 480);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
+      // Обязательно убрать за собой: если улица сменилась раньше, чем фишки
+      // доехали, таймер отменяется вместе с уборкой, и прошлый переезд остался
+      // бы висеть в разметке навсегда.
+      setFlying([]);
+    };
+  }, [street, handNumber]);
+
+  // Обновляем снимок после эффекта перехода, чтобы он видел прошлую улицу.
+  useEffect(() => {
+    if (lastStreet.current === street) lastSpots.current = spots;
+  });
+
+  return flying;
 }
