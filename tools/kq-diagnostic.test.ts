@@ -47,7 +47,7 @@ function session(state: HandState, heroSeat: number): Session {
     seatProfiles: state.players.map((p, i) =>
       i === heroSeat ? null : (PROFILE_BY_NAME[p.name] ?? PROFILE_BY_NAME['DuhaMetelkin'])),
     stacks: state.players.map((p) => p.startingStack),
-    bankroll: 0, rng: makeRng(1), awaitingNext: false,
+    bankroll: 0, rng: makeRng(1), handSeed: 1, handRng: makeRng(1), awaitingNext: false,
   };
 }
 

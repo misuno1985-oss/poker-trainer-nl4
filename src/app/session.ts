@@ -51,6 +51,15 @@ export interface Session {
   handNumber: number;
   button: number;
   state: HandState;
+  /**
+   * Зерно текущей раздачи и её собственный поток случайности.
+   *
+   * Отдельный поток на раздачу — обязательное условие для переигрывания: при
+   * том же зерне и тех же действиях героя боты примут ровно те же решения.
+   * Общий на всю сессию поток этого не давал бы.
+   */
+  handSeed: number;
+  handRng: Rng;
   /** Профили по местам; на месте героя — null. */
   seatProfiles: (BotProfile | null)[];
   /** Стеки, которые переносятся между раздачами. */
@@ -90,6 +99,8 @@ export function newSession(config: SessionConfig): Session {
     handNumber: 0,
     button: 0,
     state: null as unknown as HandState,
+    handSeed: 0,
+    handRng: makeRng(1),
     seatProfiles,
     stacks,
     bankroll: 0,
@@ -118,6 +129,9 @@ export function dealNext(session: Session): Session {
     });
     // Изредка кто-то встаёт и на его место садится другой игрок.
     for (let i = 1; i < SEATS; i++) {
+      // Закреплённый соперник со стола не уходит: в режиме «против игрока»
+      // весь смысл в том, что он всегда напротив.
+      if (config.pinned && session.seatProfiles[i]?.name === config.pinned) continue;
       if (session.rng() < 0.04) {
         const fresh = pickOpponents(session.rng, config.pinned)[0];
         if (!session.seatProfiles.some((p) => p?.name === fresh.name)) {
@@ -131,6 +145,8 @@ export function dealNext(session: Session): Session {
 
   session.handNumber += 1;
   session.awaitingNext = false;
+  session.handSeed = (config.seed * 7919 + session.handNumber * 131) >>> 0;
+  session.handRng = makeRng(session.handSeed || 1);
   session.state = createHand({
     seats: session.seatProfiles.map((p, i) => ({
       name: p ? p.name : config.heroName,
@@ -139,9 +155,52 @@ export function dealNext(session: Session): Session {
     button: session.button,
     smallBlind: config.smallBlind,
     bigBlind: config.bigBlind,
-    seed: (config.seed * 7919 + session.handNumber * 131) >>> 0,
+    seed: session.handSeed,
   });
   return session;
+}
+
+/**
+ * Пересобрать раздачу заново из её описания — для переигрывания.
+ * Те же места, стеки, баттон и зерно дают ту же колоду и то же поведение ботов.
+ */
+export function restoreHand(session: Session, setup: HandSetup): Session {
+  session.handNumber = setup.handNumber;
+  session.button = setup.button;
+  session.handSeed = setup.seed;
+  session.handRng = makeRng(setup.seed || 1);
+  session.seatProfiles = setup.seatNames.map((n, i) =>
+    i === HERO_SEAT ? null : profileFor(n));
+  session.stacks = setup.stacks.slice();
+  session.awaitingNext = false;
+  session.state = createHand({
+    seats: setup.seatNames.map((name, i) => ({ name, stack: setup.stacks[i] })),
+    button: setup.button,
+    smallBlind: session.config.smallBlind,
+    bigBlind: session.config.bigBlind,
+    seed: setup.seed,
+  });
+  return session;
+}
+
+/** Всё, что нужно, чтобы воспроизвести раздачу заново. */
+export interface HandSetup {
+  handNumber: number;
+  seed: number;
+  button: number;
+  seatNames: string[];
+  stacks: number[];
+}
+
+/** Снять описание текущей раздачи до её начала. */
+export function handSetupOf(session: Session): HandSetup {
+  return {
+    handNumber: session.handNumber,
+    seed: session.handSeed,
+    button: session.button,
+    seatNames: session.state.players.map((p) => p.name),
+    stacks: session.state.players.map((p) => p.startingStack),
+  };
 }
 
 export function isHeroTurn(session: Session): boolean {
@@ -158,7 +217,7 @@ export function botChoice(session: Session): ActionRequest | null {
   const seat = session.state.toAct;
   const profile = session.seatProfiles[seat]!;
   const profiles = session.seatProfiles.map((p) => p ?? HERO_STUB);
-  const ctx = buildContext(session.state, seat, profile, knobsFor(profile), profiles, session.rng);
+  const ctx = buildContext(session.state, seat, profile, knobsFor(profile), profiles, session.handRng);
   return decide(ctx);
 }
 

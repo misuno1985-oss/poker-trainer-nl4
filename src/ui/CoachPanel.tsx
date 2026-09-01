@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { ReviewedDecision } from './useSession';
+import type { DecisionRecord } from '../app/trainer';
 import type { WhySection } from '../coach/types';
 
 /**
@@ -9,8 +9,8 @@ import type { WhySection } from '../coach/types';
  */
 
 interface Props {
-  review: ReviewedDecision | null;
-  handReviews: ReviewedDecision[];
+  review: DecisionRecord | null;
+  handReviews: DecisionRecord[];
 }
 
 const STREET_RU: Record<string, string> = {

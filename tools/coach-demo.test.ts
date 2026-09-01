@@ -42,6 +42,8 @@ function session(state: HandState, heroSeat: number): Session {
     stacks: state.players.map((p) => p.startingStack),
     bankroll: 0,
     rng: makeRng(1),
+    handSeed: 1,
+    handRng: makeRng(1),
     awaitingNext: false,
   };
 }
