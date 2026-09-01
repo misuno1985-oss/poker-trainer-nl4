@@ -74,8 +74,14 @@ export interface Candidate {
 export interface EvDetail {
   /** Наша доля против диапазона соперника, 0..1. */
   equity: number;
-  /** Доля против того, с чем он продолжит после нашей ставки. */
+  /** Доля против того, с чем он УРАВНЯЕТ нашу ставку. */
   equityVsContinue?: number;
+  /** Доля против того, с чем он ПОВЫСИТ в ответ. */
+  equityVsReraise?: number;
+  /** Как часто он просто уравняет. */
+  callChance?: number;
+  /** Как часто повысит в ответ. */
+  reraiseChance?: number;
   /** Как часто он сбросит на такую ставку. */
   foldEquity?: number;
   /** Цена колла и требуемая доля. */
@@ -122,6 +128,12 @@ export interface Brief {
   good: string | null;
   bad: string | null;
   better: string | null;
+  /**
+   * Одной строкой: какие варианты близки, а какие заметно хуже. Нужна, чтобы
+   * текст, баллы и посчитанные EV описывали одну и ту же картину, а не спорили
+   * друг с другом.
+   */
+  picture: string;
 }
 
 export interface WhySection {

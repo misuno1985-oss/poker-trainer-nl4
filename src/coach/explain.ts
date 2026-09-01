@@ -43,48 +43,75 @@ export function buildBrief(
   scores: Scores,
 ): Brief {
   const sameKind = chosen.kind === best.kind;
-  const close = scores.certainty === 'close';
+  const picture = describePicture(snap, scores);
 
-  let good: string | null = null;
-  let bad: string | null = null;
-  let better: string | null = null;
-
-  if (close) {
-    const alt = actionLabel(best);
-    good = `Решение близкое: ${actionLabel(chosen)} и ${alt} здесь примерно равны.`;
-    if (!sameKind) {
-      better = `Я чуть больше за ${alt}, но разница небольшая.`;
-    }
-    return { good, bad, better };
+  // «Близко» относится к ВЫБРАННОМУ ходу, а не к паре лучших вариантов.
+  // Иначе получалось бы «CALL 10 / FOLD 5 — разница небольшая», где текст и
+  // баллы говорят разное.
+  if (scores.chosenCertainty === 'close') {
+    const good = sameKind
+      ? `${actionLabel(chosen)} — здесь это лучший вариант.`
+      : `${actionLabel(chosen)} и ${actionLabel(best)} здесь примерно равны.`;
+    const better = sameKind ? null : `Я чуть больше за ${actionLabel(best)}, но разница небольшая.`;
+    return { good, bad: null, better, picture };
   }
 
   if (sameKind && scores.sizingScore !== null && scores.sizingScore < 7) {
     // Тип действия верный, подвёл размер.
     const want = scores.bestOfSameKind?.total ?? 0;
     const got = chosen.total ?? 0;
-    good = 'Сама идея правильная — рука годится для ставки.';
-    bad =
+    const bad =
       got > want
         ? `Размер слишком большой. Ты рискуешь ${money(got - snap.legal.streetCommit)} там, ` +
           `где хватило бы примерно ${money(want - snap.legal.streetCommit)}: слабые руки всё ` +
           'равно выбросят, а платить будут только те, что тебя бьют.'
         : `Размер маловат. При ${money(got - snap.legal.streetCommit)} соперник заходит слишком ` +
           `дёшево — примерно ${money(want - snap.legal.streetCommit)} собрало бы больше.`;
-    better = actionLabel(scores.bestOfSameKind ?? best);
-    return { good, bad, better };
+    return {
+      good: 'Сама идея правильная — рука годится для такой линии.',
+      bad,
+      better: actionLabel(scores.bestOfSameKind ?? best),
+      picture,
+    };
   }
 
   if (sameKind) {
-    good = `${actionLabel(chosen)} — здесь это лучший вариант.`;
-    return { good, bad, better };
+    return { good: `${actionLabel(chosen)} — здесь это лучший вариант.`, bad: null, better: null, picture };
   }
 
-  bad = explainWhyWorse(snap, chosen, best);
-  better = actionLabel(best);
-  if (scores.actionScore >= 6) {
-    good = 'Вариант рабочий, но есть заметно лучше.';
+  return {
+    good: scores.chosenCertainty === 'unclear' ? 'Вариант рабочий, но есть лучше.' : null,
+    bad: explainWhyWorse(snap, chosen, best),
+    better: actionLabel(best),
+    picture,
+  };
+}
+
+/**
+ * Картина целиком: что близко, что заметно хуже. Строится ровно из тех же
+ * чисел, что и баллы, поэтому спорить с ними не может.
+ */
+function describePicture(snap: DecisionSnapshot, scores: Scores): string {
+  const norm = Math.max(snap.pot, 4 * snap.bigBlind);
+  const list = scores.byKind;
+  if (list.length === 0) return '';
+  const top = list[0];
+
+  const near = list.filter((c) => (top.ev - c.ev) / norm < 0.05);
+  const far = list.filter((c) => (top.ev - c.ev) / norm >= 0.05);
+
+  const names = (cs: Candidate[]) => cs.map(actionLabel).join(' и ');
+
+  if (near.length >= 2 && far.length > 0) {
+    return `${names(near)} — примерно равны; ${names(far)} заметно хуже.`;
   }
-  return { good, bad, better };
+  if (near.length >= 2) {
+    return `${names(near)} — примерно равны.`;
+  }
+  if (far.length > 0) {
+    return `${actionLabel(top)} заметно лучше остального.`;
+  }
+  return `${actionLabel(top)} — единственный разумный вариант.`;
 }
 
 function explainWhyWorse(snap: DecisionSnapshot, chosen: Candidate, best: Candidate): string {
@@ -247,12 +274,17 @@ export function buildWhy(
 
   // --- уверенность
   const confLines: string[] = [];
+  confLines.push(scores.certainty === 'close'
+    ? 'Два лучших варианта почти равны — правильного ответа здесь по сути нет.'
+    : scores.certainty === 'unclear'
+      ? 'Два лучших варианта различаются немного.'
+      : 'Лучший вариант заметно опережает остальные.');
   confLines.push(
-    scores.certainty === 'close'
-      ? 'Варианты почти равны — это тот случай, когда правильного ответа по сути нет.'
-      : scores.certainty === 'unclear'
-        ? 'Разница между вариантами небольшая.'
-        : 'Разница между вариантами заметная.',
+    scores.chosenCertainty === 'close'
+      ? 'Твой ход — среди этих лучших.'
+      : scores.chosenCertainty === 'unclear'
+        ? 'Твой ход немного отстаёт от лучшего.'
+        : 'Твой ход заметно отстаёт от лучшего.',
   );
   confLines.push(
     confidence.data === 'good'

@@ -67,6 +67,8 @@ export function CoachPanel({ review, handReviews }: Props) {
         </p>
       )}
 
+      {v.brief.picture && <p className="coach-picture">{v.brief.picture}</p>}
+
       {v.leakNotes.map((n) => (
         <div key={n.id} className={`leak-note ${n.triggered ? '' : 'leak-quiet'}`}>
           <strong>{n.title}</strong>

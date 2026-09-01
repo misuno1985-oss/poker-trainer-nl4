@@ -16,6 +16,7 @@ import { preflopPercentile, isBluffCandidate } from '../bots/decide';
 import type { BotProfile } from '../bots/profiles';
 import type { Action, Street } from '../game/types';
 import type { DecisionSnapshot, OpponentView } from './types';
+import { boardAt, boardChange, completesChange, type BoardChange } from './texture';
 
 export interface Combo {
   cards: [Card, Card];
@@ -213,6 +214,15 @@ function applyStreet(range: WeightedRange, snap: DecisionSnapshot, opp: Opponent
   const board = boardFor(snap.board, street);
   if (board.length === 0) return;
 
+  // Что сделала свежая карта. Крупная ставка на карте, закрывшей флеш, и
+  // такая же ставка на пустой карте — разные заявления, и диапазон после них
+  // должен получаться разным.
+  const previous =
+    street === 'turn' ? boardAt(snap.board, 'flop')
+    : street === 'river' ? boardAt(snap.board, 'turn')
+    : [];
+  const change: BoardChange = boardChange(previous, board);
+
   const stats =
     street === 'flop' ? opp.profile.flop : street === 'turn' ? opp.profile.turn : opp.profile.river;
   const bluff = bluffShareOf(opp.profile);
@@ -233,9 +243,15 @@ function applyStreet(range: WeightedRange, snap: DecisionSnapshot, opp: Opponent
       if (act.kind === 'bet' || act.kind === 'raise') {
         const freq = act.kind === 'raise' ? Math.max(0.04, stats.raiseVsBet) : stats.betFirst;
         const actBluff = bluffShareFor(opp.profile, street, act.kind);
-        const valueTop = freq * (1 - actBluff);
+        // На страшной карте ценностный диапазон уже: ставят те, кто доехал.
+        const narrow = 1 - 0.35 * change.danger;
+        const valueTop = freq * (1 - actBluff) * narrow;
         // Ставит верхушкой диапазона...
         w = r >= 1 - valueTop ? 1 : 0;
+        // ...и обязательно теми руками, которые эта карта только что сделала.
+        if (w === 0 && change.danger >= 0.7 && completesChange(combo.cards, board, change.kind)) {
+          w = 1;
+        }
         // ...и долей блефа, у кого он вообще есть. Вес блефа подбирается ниже
         // так, чтобы его суммарная доля совпала с предполагаемой.
         // HEURISTIC: блеф берётся из дро и совсем слабых рук.
@@ -246,7 +262,12 @@ function applyStreet(range: WeightedRange, snap: DecisionSnapshot, opp: Opponent
       } else if (act.kind === 'call') {
         // Продолжает тем, что не сбросил бы.
         const continueTop = 1 - stats.foldVsBet;
-        w = r >= 1 - continueTop ? 1 : 0.06;
+        // Дро коллируют не потому, что рука уже сильная, а потому что она
+        // может стать сильной. Без этого модель выбрасывала флеш-дро на флопе
+        // и на тёрне, закрывшем флеш, у соперника не оказывалось ни одного
+        // флеша — то есть текстура доски не работала вовсе.
+        const drawContinues = street !== 'river' && hasDraw(combo.cards, board);
+        w = r >= 1 - continueTop ? 1 : drawContinues ? 0.7 : 0.06;
         if (level > 1 && r > 1 - continueTop * 0.25) w *= 0.75; // с топом он бы повысил
       } else if (act.kind === 'check') {
         // Проверил — значит сильнейшую часть, скорее всего, поставил бы.
@@ -307,23 +328,58 @@ export function rangeSize(range: WeightedRange): number {
 }
 
 /**
- * Разделить диапазон на «продолжит» и «сбросит» при ставке размера
- * `betFraction` от банка. Верхняя часть по силе продолжает.
+ * Как соперник ответит на нашу ставку или повышение.
+ *
+ * Разделять обязательно на три части, а не на две. Разница принципиальная:
+ * герой может прекрасно стоять против диапазона, с которым соперник ПОСТАВИЛ,
+ * но повышение выгонит оттуда ровно те руки, которые герой бил, и заплатят
+ * только те, что его бьют. Ровно поэтому колл иногда лучше рейза.
+ *
+ *   folds     — нижняя часть по силе плюс весь блеф;
+ *   calls     — середина: достаточно сильно, чтобы платить, но не повышать;
+ *   reraises  — верхушка.
  */
-export function splitByContinue(
+export interface RaiseResponse {
+  pFold: number;
+  pCall: number;
+  pReraise: number;
+  calls: WeightedRange;
+  reraises: WeightedRange;
+}
+
+export function respondTo(
   range: WeightedRange,
   board: Card[],
-  foldFrequency: number,
-): { continues: WeightedRange; foldFrequency: number } {
-  if (board.length === 0 || foldFrequency <= 0) {
-    return { continues: range, foldFrequency: 0 };
+  pFold: number,
+  pReraise: number,
+): RaiseResponse {
+  const fold = Math.max(0, Math.min(0.95, pFold));
+  const rer = Math.max(0, Math.min(1 - fold, pReraise));
+  const call = Math.max(0, 1 - fold - rer);
+
+  if (board.length === 0) {
+    return { pFold: fold, pCall: call, pReraise: rer, calls: range, reraises: range };
   }
+
   const ranks = strengthRanks(range, board);
-  const keep = Math.max(0.02, 1 - foldFrequency);
-  const continues = range
-    .filter((c) => (ranks.get(c) ?? 0.5) >= 1 - keep)
-    .map((c) => ({ ...c }));
-  return { continues: continues.length ? continues : range, foldFrequency };
+  const slice = (lo: number, hi: number): WeightedRange => {
+    const out = range
+      .filter((c) => {
+        const r = ranks.get(c) ?? 0.5;
+        return r >= lo && r < hi;
+      })
+      .map((c) => ({ ...c }));
+    return out.length ? out : range.map((c) => ({ ...c }));
+  };
+
+  // Слабейшие сбрасывают, середина платит, верхушка повышает.
+  return {
+    pFold: fold,
+    pCall: call,
+    pReraise: rer,
+    calls: slice(fold, fold + call),
+    reraises: slice(1 - rer, 1.01),
+  };
 }
 
 /** Названия групп рук в диапазоне — для окна «Почему?». */

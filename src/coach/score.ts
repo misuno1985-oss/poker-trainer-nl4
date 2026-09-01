@@ -16,9 +16,18 @@ function scale(snap: DecisionSnapshot): number {
   return Math.max(snap.pot, 4 * snap.bigBlind);
 }
 
-/** Плавный перевод отставания в баллы. Отставание 0 → 10, четверть банка → ~4.5. */
+/**
+ * Плавный перевод отставания в баллы.
+ *
+ * Кривая подобрана так, чтобы близкие решения оставались близкими по оценке
+ * (отставание в 5% банка — это ещё 8 из 10), но потеря целой доли банка уже
+ * читалась как ошибка, а не как «почти правильно».
+ *
+ *   0.00 → 10      0.05 → 8.1     0.10 → 6.6
+ *   0.15 → 5.3     0.25 → 3.5     0.50 → 1.2
+ */
 export function scoreFromGap(gap: number): number {
-  const s = 10 * Math.exp(-3.2 * Math.max(0, gap));
+  const s = 10 * Math.exp(-4.2 * Math.max(0, gap));
   return Math.round(Math.max(1, Math.min(10, s)) * 10) / 10;
 }
 
@@ -26,9 +35,16 @@ export interface Scores {
   actionScore: number;
   sizingScore: number | null;
   score: number;
+  /** Насколько разошлись два лучших РАЗНЫХ действия. */
   certainty: Certainty;
+  /** Насколько далёк от лучшего именно ВЫБРАННЫЙ ход. */
+  chosenCertainty: Certainty;
+  /** Отставание выбранного хода от лучшего, в долях банка. */
+  chosenGap: number;
   /** Лучший вариант того же типа, что выбрал герой. */
   bestOfSameKind: Candidate | null;
+  /** Лучший вариант каждого типа, по убыванию. */
+  byKind: Candidate[];
 }
 
 export function buildScores(
@@ -58,13 +74,34 @@ export function buildScores(
       ? actionScore
       : Math.round((actionScore * 0.65 + sizingScore * 0.35) * 10) / 10;
 
+  const chosenGap = (best.ev - chosen.ev) / norm;
+
   return {
     actionScore,
     sizingScore,
     score,
     certainty: certaintyOf(candidates, norm),
+    chosenCertainty: bandOf(chosenGap),
+    chosenGap,
     bestOfSameKind,
+    byKind: bestPerKind(candidates),
   };
+}
+
+/** Лучший вариант каждого типа действия, по убыванию ожидаемого результата. */
+export function bestPerKind(candidates: Candidate[]): Candidate[] {
+  const map = new Map<string, Candidate>();
+  for (const c of candidates) {
+    const prev = map.get(c.kind);
+    if (!prev || c.ev > prev.ev) map.set(c.kind, c);
+  }
+  return [...map.values()].sort((a, b) => b.ev - a.ev);
+}
+
+function bandOf(gap: number): Certainty {
+  if (gap < 0.05) return 'close';
+  if (gap < 0.13) return 'unclear';
+  return 'clear';
 }
 
 /**
@@ -80,12 +117,9 @@ function certaintyOf(candidates: Candidate[], norm: number): Certainty {
   }
   const values = [...bestByKind.values()].sort((a, b) => b - a);
   if (values.length < 2) return 'clear';
-  const gap = (values[0] - values[1]) / norm;
   // Пороги нарочно широкие: лучше честно сказать «примерно одно и то же»,
   // чем выдать уверенную рекомендацию там, где разница в пару центов.
-  if (gap < 0.05) return 'close';
-  if (gap < 0.13) return 'unclear';
-  return 'clear';
+  return bandOf((values[0] - values[1]) / norm);
 }
 
 /**

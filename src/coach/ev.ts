@@ -14,7 +14,8 @@
 
 import type { Card } from '../engine/cards';
 import { equityVsRanges } from './equity';
-import { bluffShareOf, inferRange, splitByContinue, type WeightedRange } from './range';
+import { bluffShareOf, inferRange, respondTo, type WeightedRange } from './range';
+import { boardAt, boardChange } from './texture';
 import type { Candidate, DecisionSnapshot, EvDetail } from './types';
 
 export interface Analysis {
@@ -67,6 +68,12 @@ export function foldEquity(snap: DecisionSnapshot, betSize: number): number {
   // HEURISTIC: крупнее ставка — чаще фолд, но зависимость пологая.
   const sizeAdjust = 0.72 + 0.42 * Math.min(1.6, ratio);
 
+  // Свежая карта меняет не только диапазон, но и готовность сбрасывать. Тот,
+  // кто поставил ровно на карте, закрывшей флеш или стрит, чаще всего именно
+  // её и получил, и на повышение он не уходит.
+  const danger = dangerOfLastCard(snap);
+  const textureDamp = 1 - 0.45 * danger;
+
   for (const opp of snap.opponents) {
     if (opp.allIn) continue;
     let f: number;
@@ -94,6 +101,7 @@ export function foldEquity(snap: DecisionSnapshot, betSize: number): number {
       // ситуация, которая в базе игрока оказалась самой дорогой.
       const times = aggressionCount(snap, opp.seat);
       f *= Math.pow(0.5, times - 1);
+      f *= textureDamp;
 
       f = Math.max(0.03, Math.min(0.78, f));
       combined *= f;
@@ -109,6 +117,17 @@ export function foldEquity(snap: DecisionSnapshot, betSize: number): number {
     combined *= Math.max(0.02, Math.min(0.94, f));
   }
   return snap.opponents.length === 0 ? 1 : combined;
+}
+
+/** Насколько опасна карта, пришедшая на текущей улице. */
+function dangerOfLastCard(snap: DecisionSnapshot): number {
+  if (snap.street === 'turn') {
+    return boardChange(boardAt(snap.board, 'flop'), boardAt(snap.board, 'turn')).danger;
+  }
+  if (snap.street === 'river') {
+    return boardChange(boardAt(snap.board, 'turn'), boardAt(snap.board, 'river')).danger;
+  }
+  return 0;
 }
 
 /** Размеры ставок, которые тренер вообще рассматривает. */
@@ -195,9 +214,33 @@ export function analyse(snap: DecisionSnapshot): Analysis {
 }
 
 /**
+ * Как часто соперник ответит на нашу ставку повторным повышением.
+ * HEURISTIC: опирается на его измеренную частоту рейза чужой ставки, но с
+ * поправкой — против крупного повышения повышают только с самой верхушкой.
+ */
+function reraiseChance(snap: DecisionSnapshot, ratio: number): number {
+  let any = 0;
+  for (const opp of snap.opponents) {
+    if (opp.allIn) continue;
+    const stats =
+      snap.street === 'flop' ? opp.profile.flop
+      : snap.street === 'turn' ? opp.profile.turn
+      : snap.street === 'river' ? opp.profile.river
+      : opp.profile.flop;
+    const base = Math.max(0.02, stats.raiseVsBet) * 0.8;
+    const p = Math.max(0.01, Math.min(0.3, base / Math.max(0.6, ratio)));
+    any = 1 - (1 - any) * (1 - p);
+  }
+  return any;
+}
+
+/**
  * Оценка ставки или повышения ровно того размера, который выбран.
- * Нужна отдельно, потому что герой может поставить любую сумму, а не только
- * ту, что тренер держит в списке кандидатов.
+ *
+ * Считается по ТРЁМ веткам ответа соперника, а не по двум. Это тот случай,
+ * когда упрощение меняет ответ: против диапазона, с которым он ПОСТАВИЛ, у
+ * героя может быть отличная доля, но повышение выгонит именно те руки, что он
+ * бил, и уравняют его только те, что бьют его самого.
  */
 export function evalAggressive(
   snap: DecisionSnapshot,
@@ -208,24 +251,46 @@ export function evalAggressive(
   seed: number,
 ): Candidate {
   const added = total - snap.legal.streetCommit;
-  const fe = foldEquity(snap, added);
-  const perOpponent = 1 - Math.pow(1 - fe, 1 / Math.max(1, rangeList.length));
-  const continues = rangeList.map((range, i) =>
-    splitByContinue(range, snap.board, snap.opponents[i]?.allIn ? 0 : perOpponent).continues,
+  const ratio = snap.pot > 0 ? added / snap.pot : 1;
+  const pFold = foldEquity(snap, added);
+  const pReraise = Math.min(1 - pFold, reraiseChance(snap, ratio));
+
+  const perOppFold = 1 - Math.pow(1 - pFold, 1 / Math.max(1, rangeList.length));
+  const responses = rangeList.map((range, i) =>
+    respondTo(range, snap.board, snap.opponents[i]?.allIn ? 0 : perOppFold, pReraise),
   );
-  const eqCalled = equityVsRanges(snap.heroCards, snap.board, continues, seed + 7);
 
-  // Если нас уравняли, мы выигрываем банк ПЛЮС то, что доложил соперник, —
-  // а не плюс собственную добавку. На рейзе это разные суммы: часть нашей
-  // добавки лишь покрывает его ставку, которая уже лежит в банке.
-  const calledBy = snap.opponents.reduce((sum, o) => {
-    if (o.allIn) return sum;
-    return sum + Math.min(o.stack, Math.max(0, total - o.streetCommit));
-  }, 0) / Math.max(1, snap.opponents.filter((o) => !o.allIn).length);
+  const eqCall = equityVsRanges(
+    snap.heroCards, snap.board, responses.map((r) => r.calls), seed + 7,
+  );
+  const eqReraise = equityVsRanges(
+    snap.heroCards, snap.board, responses.map((r) => r.reraises), seed + 11,
+  );
 
-  const ev =
-    fe * snap.pot +
-    (1 - fe) * (eqCalled * (snap.pot + calledBy) - (1 - eqCalled) * added);
+  // Уравняв, соперник докладывает разницу до нашей суммы, а не всю нашу
+  // добавку: часть её лишь покрывает его ставку, уже лежащую в банке.
+  const live = snap.opponents.filter((o) => !o.allIn);
+  const calledBy =
+    live.reduce((sum, o) => sum + Math.min(o.stack, Math.max(0, total - o.streetCommit)), 0) /
+    Math.max(1, live.length);
+
+  const evCalled = eqCall * (snap.pot + calledBy) - (1 - eqCall) * added;
+
+  // Если он повысит в ответ: считаем повышение примерно в 2.6 раза от нашего
+  // и берём лучшее из «уравнять» и «выбросить». Сдача здесь намеренно
+  // осторожная — переоценивать собственную руку в этой точке дороже всего.
+  const theirRaiseTo = Math.min(
+    (live[0]?.stack ?? total) + (live[0]?.streetCommit ?? 0),
+    Math.round(total * 2.6),
+  );
+  const theirPutIn = Math.max(0, theirRaiseTo - (live[0]?.streetCommit ?? 0));
+  const ourExtra = Math.min(snap.heroStack - added, Math.max(0, theirRaiseTo - total));
+  const evCallReraise =
+    eqReraise * (snap.pot + theirPutIn) - (1 - eqReraise) * (added + ourExtra);
+  const evVsReraise = Math.max(-added, evCallReraise);
+
+  const pCall = Math.max(0, 1 - pFold - pReraise);
+  const ev = pFold * snap.pot + pCall * evCalled + pReraise * evVsReraise;
 
   return {
     kind,
@@ -233,9 +298,12 @@ export function evalAggressive(
     ev,
     detail: {
       equity: rawEquity,
-      equityVsContinue: eqCalled,
-      foldEquity: fe,
-      note: 'Частота сброса взята из его реальной статистики; поправка на размер ставки — оценка.',
+      equityVsContinue: eqCall,
+      equityVsReraise: eqReraise,
+      foldEquity: pFold,
+      callChance: pCall,
+      reraiseChance: pReraise,
+      note: 'Частота сброса — из его статистики; деление ответа на колл и рейз — оценка модели.',
     },
   };
 }

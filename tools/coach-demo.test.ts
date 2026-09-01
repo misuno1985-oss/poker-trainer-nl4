@@ -81,6 +81,7 @@ function printVerdict(v: CoachVerdict, indent = '    ') {
   if (v.brief.good) console.log(`${indent}  + ${v.brief.good}`);
   if (v.brief.bad) console.log(`${indent}  − ${v.brief.bad}`);
   if (v.brief.better) console.log(`${indent}  → лучше: ${v.brief.better}`);
+  if (v.brief.picture) console.log(`${indent}  картина: ${v.brief.picture}`);
   const top = v.ranked.slice(0, 3).map((c) => `${actionLabel(c)} ${money(Math.round(c.ev))}`);
   console.log(`${indent}  варианты: ${top.join('  |  ')}`);
   for (const n of v.leakNotes) {
