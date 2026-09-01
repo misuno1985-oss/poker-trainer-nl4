@@ -112,6 +112,8 @@ export interface HandState {
 
 export interface LegalActions {
   seat: number;
+  /** Сколько этот игрок уже вложил на текущей улице. */
+  streetCommit: number;
   toCall: number;
   canFold: boolean;
   canCheck: boolean;

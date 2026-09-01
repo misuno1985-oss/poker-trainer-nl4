@@ -49,6 +49,7 @@ export function legalActions(state: HandState): LegalActions | null {
 
   return {
     seat: p.seat,
+    streetCommit: p.streetCommit,
     toCall,
     canFold: true,
     canCheck: toCall === 0,
