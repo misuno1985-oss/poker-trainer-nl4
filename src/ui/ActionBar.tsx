@@ -113,6 +113,17 @@ export function ActionBar({ legal, decisionKey, pot, bigBlind, preflop, onAct, d
             <button type="button" className="btn btn-chip chip-allin" onClick={() => fire(bounds.max)}>
               ALL-IN
             </button>
+            {/* Подсказка стоит в одной строке с долями банка, а не отдельной
+                строкой: каждая лишняя строка здесь ужимает стол сверху. */}
+            <p className="sizer-hint">
+              {legal.toCall > 0
+                ? `сверх колла ${money(amount - legal.streetCommit - legal.toCall)} · ` +
+                  `банк станет ${money(pot + (amount - legal.streetCommit))}`
+                : pot > 0 && `${Math.round((amount / pot) * 100)}% банка · ` +
+                  `банк станет ${money(pot + amount - legal.streetCommit)}`}
+              {' · минимум '}
+              {money(bounds.min)}
+            </p>
           </div>
 
           <div className="sizer-row">
@@ -140,15 +151,6 @@ export function ActionBar({ legal, decisionKey, pot, bigBlind, preflop, onAct, d
               {kind === 'bet' ? 'BET' : 'RAISE TO'} {money(amount)}
             </button>
           </div>
-          <p className="sizer-hint">
-            {legal.toCall > 0
-              ? `сверх колла ${money(amount - legal.streetCommit - legal.toCall)} · ` +
-                `банк станет ${money(pot + (amount - legal.streetCommit))}`
-              : pot > 0 && `${Math.round((amount / pot) * 100)}% банка · ` +
-                `банк станет ${money(pot + amount - legal.streetCommit)}`}
-            {' · минимум '}
-            {money(bounds.min)}
-          </p>
         </div>
       )}
 

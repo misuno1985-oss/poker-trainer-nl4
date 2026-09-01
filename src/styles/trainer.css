@@ -13,16 +13,20 @@
   overflow: hidden;
 }
 
+/* На широком экране игровой экран не прокручивается вовсе: шапка, стол, герой,
+   панель тренера и кнопки помещаются в окно целиком. Прокрутка, если она
+   нужна, живёт внутри панели тренера — там, где бывает длинный разбор. */
 .layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 330px;
+  /* Ряд ровно в высоту окна, а не в высоту содержимого: иначе длинный разбор
+     тренера растягивал бы ряд, и обе колонки вылезали бы за экран. */
+  grid-template-rows: minmax(0, 1fr);
   gap: 18px;
   padding: 16px 20px 0;
   flex: 1;
   min-height: 0;
-  /* Прокручивается именно эта область, поэтому кнопки действий внизу всегда
-     остаются на экране — на телефоне без этого играть невозможно. */
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .table-area {
@@ -30,17 +34,46 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  /* Запас на таблички мест: они выходят за овал вверх и вниз, и без запаса
+     нижняя, героева, пряталась бы под панелью кнопок.
+     Табличка героя выступает вниз на (73 - 0.12 * высота стола) пикселей —
+     чем меньше стол, тем больше выступ, поэтому запас взят по худшему случаю:
+     невысокое окно с раскрытой панелью размера ставки. */
+  padding: 30px 0 38px;
+  /* Ячейка становится контейнером с известным размером — от него считается
+     стол. Заодно это отрезает обратную связь «стол задаёт высоту ячейки». */
+  container-type: size;
 }
 
 /* ---------------- стол ---------------- */
 
 .table-wrap {
   position: relative;
-  width: 100%;
-  max-width: 920px;
+  /* Стол вписывается И по ширине, И по высоте ячейки.
+     Раньше высота бралась только из ширины (aspect-ratio при width: 100%).
+     На невысоком окне — а 1280x720 это обычный ноутбук — стол получался выше
+     своей ячейки, вылезал за неё, и панель кнопок, которая рисуется позже,
+     накрывала место героя вместе со стеком.
+
+     Ширину на широком экране проставляет useTableFit замером ячейки: то же
+     самое на контейнерных единицах в Chrome застревало на прошлом размере,
+     стоило нижней зоне поменять высоту. Значение ниже — запасное. */
+  width: min(920px, 100%);
   aspect-ratio: 16 / 10;
   margin: 0 auto;
+  /* Стол — флекс-элемент, и без этого его автоминимум (min-width: auto)
+     перебивает заданную ширину: элемент раздувается обратно во всю ячейку. */
+  min-width: 0;
+  flex: 0 0 auto;
+  /* Стол меняет размер, когда открывается панель размера ставки. Переход
+     нужен, чтобы это читалось как движение, а не как рывок. */
+  transition: width 0.16s ease;
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .table-wrap { transition: none; }
+}
+
 
 .felt {
   position: absolute;
@@ -250,7 +283,12 @@
   border-radius: var(--radius);
   background: var(--panel);
   border: 1px solid var(--line);
-  align-self: start;
+  /* Панель занимает ровно свою ячейку и прокручивается внутри себя. Раньше
+     здесь стоял align-self: start, панель росла по содержимому, и длинный
+     разбор тренера уводил её низ под панель кнопок. */
+  align-self: stretch;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .panel-label {
@@ -359,7 +397,7 @@
 
 .controls {
   flex: 0 0 auto;
-  padding: 12px 20px 18px;
+  padding: 10px 20px 14px;
   border-top: 1px solid var(--line);
   background: rgba(10, 15, 30, 0.92);
   backdrop-filter: blur(6px);
@@ -377,15 +415,21 @@
 .actions { display: flex; gap: 10px; justify-content: center; }
 .actions .btn { min-width: 132px; padding: 11px 14px; font-weight: 700; letter-spacing: 0.04em; }
 
+/* Панель размера ставки раздвигает нижнюю зону и тем самым ужимает стол.
+   Поэтому она собрана как можно ниже: подсказка стоит в одной строке с
+   быстрыми долями банка, а не отдельной строкой под слайдером. */
 .sizer {
-  margin-bottom: 12px;
-  padding: 12px;
+  margin-bottom: 8px;
+  padding: 9px 10px;
   border-radius: var(--radius);
   background: var(--panel-solid);
   border: 1px solid var(--line);
 }
 
-.sizer-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.sizer-chips {
+  display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px;
+  align-items: center;
+}
 .chip-allin { margin-left: auto; border-color: rgba(255, 107, 107, 0.5); color: #ffb3b3; }
 
 .sizer-row { display: flex; align-items: center; gap: 10px; }
@@ -399,7 +443,13 @@
   font: inherit; font-variant-numeric: tabular-nums; text-align: right;
 }
 
-.sizer-hint { margin: 8px 0 0; font-size: 11px; color: var(--muted); }
+.sizer-hint {
+  margin: 0 0 0 auto;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: right;
+  white-space: nowrap;
+}
 
 /* ---------------- окно про соперника ---------------- */
 
@@ -651,6 +701,48 @@
   font-size: 12.5px; color: var(--accent);
 }
 
+/* Тесный стол: те же места, но компактнее. Порог взят по замеру: ниже 680px
+   таблички в полный рост начинают задевать маркеры ставок, потому что места и
+   фишки заданы в пикселях, а их позиции — в процентах от стола.
+
+   Спрашиваем размер ЯЧЕЙКИ, а не самого стола. Ширина стола — это
+   min(920, 100cqw, 160cqh), поэтому «стол уже 760» — это ровно «ячейка уже
+   760 или ниже 475». Сделать контейнером сам стол нельзя: тогда 100cqw в его
+   собственной ширине ссылался бы на самого себя, и ширина застревала бы на
+   старом значении — на этом я один раз уже попался.
+
+   Блок стоит именно здесь, после всех правил мест: у запроса контейнера нет
+   своей специфичности, и выше по файлу его перебило бы обычное `.seat`. */
+@container (max-width: 760px) or (max-height: 475px) {
+  .seat { width: 104px; }
+  .seat-name { font-size: 10.5px; }
+  .seat-stack { font-size: 10.5px; }
+  .seat-pos { font-size: 8px; padding: 1px 4px; }
+  .seat-plate { padding: 4px 7px; }
+  .seat-info { width: 15px; height: 15px; font-size: 9px; }
+  .seat-action { font-size: 9.5px; padding: 1px 7px; }
+  .seat-cards { min-height: 28px; gap: 2px; }
+  .seat { gap: 3px; }
+  .bet-amount { font-size: 11px; }
+  .chip-stack { transform: scale(0.84); }
+  /* ALL-IN написан на табличке игрока, а в маркере это самая дорогая по высоте
+     строка. На тесном столе она уступает место сумме. */
+  .bet-allin { display: none; }
+}
+
+/* Совсем тесный стол — невысокое окно с раскрытой панелью размера ставки.
+   Здесь уже и второй ступени мало, но всё должно оставаться читаемым и не
+   лезть на борд. */
+@container (max-width: 620px) or (max-height: 388px) {
+  .seat { width: 88px; gap: 2px; }
+  .seat-name { font-size: 9.5px; }
+  .seat-stack { font-size: 9.5px; }
+  .seat-plate { padding: 3px 6px; }
+  .seat-cards { min-height: 24px; }
+  .bet-amount { font-size: 9.5px; }
+  .chip-stack { transform: scale(0.66); }
+}
+
 /* ---------------- узкий экран ---------------- */
 
 @media (max-width: 900px) {
@@ -684,7 +776,11 @@
      .table-area стоит min-height: 0, и сетка в контейнере фиксированной высоты
      считала, что ряд можно сжать до нуля. Стол при этом никуда не девался — он
      просто вылезал за свою ячейку и накрывал собой панель и кнопки. */
-  .layout { align-content: start; }
+  .layout { align-content: start; overflow-y: auto; grid-template-rows: auto auto; }
+  /* На телефоне стол задаётся высотой напрямую, поэтому контейнерные единицы
+     здесь не нужны, а внутренняя прокрутка панели только мешала бы. */
+  .table-area { padding: 0; container-type: normal; }
+  .side-panel { overflow: visible; align-self: start; }
   /* Плюс запас на таблички мест: они по краям выходят за овал. */
   .table-area { align-items: flex-start; min-height: calc(var(--table-h) + 26px); }
   .felt { inset: 5% 13% 15%; border-width: 6px; }
@@ -707,6 +803,8 @@
   .topbar-right { gap: 12px; width: 100%; justify-content: space-between; }
   .brand p { font-size: 10px; }
   .controls { padding: 10px 10px calc(12px + env(safe-area-inset-bottom)); }
+  /* На телефоне ширины не хватает — подсказка возвращается на свою строку. */
+  .sizer-hint { margin: 6px 0 0; text-align: left; white-space: normal; flex: 1 1 100%; }
   .actions { flex-wrap: wrap; }
   .actions .btn { min-width: 0; flex: 1 1 30%; padding: 12px 8px; font-size: 13px; }
   .sizer-row { flex-wrap: wrap; }

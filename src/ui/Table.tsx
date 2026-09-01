@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { PlayingCard, CardBack } from './PlayingCard';
 import { BetMarker } from './BetMarker';
 import { TABLE_CENTER, betSpots, type BetSpot } from './betMarkers';
+import { useTableFit } from './useTableFit';
 import { money } from '../game/stacks';
 import { totalPot } from '../game/types';
 import { HERO_SEAT, seatViews, type Session, type SeatView } from '../app/session';
@@ -43,6 +44,9 @@ export function Table({ session, narrow, showAllCards, onInfo }: Props) {
   const views = seatViews(session);
   const coords = narrow ? SEAT_COORDS_NARROW : SEAT_COORDS;
   const pot = totalPot(state);
+  // Ширина стола на широком экране считается замером ячейки: так он всегда
+  // помещается по высоте, и панель кнопок не наезжает на место героя.
+  const [wrapRef, fitWidth] = useTableFit(16 / 10, 920, !narrow);
   const spots = betSpots(views, coords, narrow, state.bigBlind);
   // У героя подпись действия стоит НАД картами, то есть ровно там, куда на
   // узком экране приходит его маркер. Дублировать нечего: маркер говорит то же
@@ -52,7 +56,7 @@ export function Table({ session, narrow, showAllCards, onInfo }: Props) {
   const streetLabel = { preflop: 'PREFLOP', flop: 'FLOP', turn: 'TURN', river: 'RIVER', showdown: 'SHOWDOWN' }[state.street];
 
   return (
-    <div className="table-wrap">
+    <div className="table-wrap" ref={wrapRef} style={fitWidth === null ? undefined : { width: fitWidth }}>
       <div className="felt">
         <div className="felt-inner">
           <div className="table-mark">NL4 · 6-MAX</div>
