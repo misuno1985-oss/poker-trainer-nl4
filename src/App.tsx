@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Table } from './ui/Table';
 import { ActionBar } from './ui/ActionBar';
 import { OpponentInfo } from './ui/OpponentInfo';
@@ -27,6 +27,18 @@ export default function App() {
   const anim = useTableTimeline(t.session, t.screen === 'table');
 
   const close = () => setAnalysis(false);
+  // Открыть подробный разбор — значит захотеть читать. Отсчёт до следующей
+  // раздачи в этот момент отменяется: соревноваться с таймером незачем.
+  const openAnalysis = () => { t.holdAutoNext(); setAnalysis(true); };
+
+  // Обратный отсчёт живёт в ref-ах хука, поэтому его надо подтолкнуть к
+  // перерисовке — иначе цифра замрёт.
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (t.autoNextIn === null) return;
+    const id = window.setInterval(() => tick((n) => n + 1), 250);
+    return () => window.clearInterval(id);
+  }, [t.autoNextIn === null]);
 
   if (t.screen === 'start') {
     return (
@@ -46,6 +58,8 @@ export default function App() {
       <Shell>
         <SummaryScreen
           totals={t.totals}
+          progress={t.progress}
+          sessionLog={t.sessionLog}
           onRestart={() => t.start(t.mode, t.stackMode)}
           onHome={() => t.goto('start')}
           onMistakes={() => t.goto('mistakes')}
@@ -146,13 +160,19 @@ export default function App() {
                 ) : (
                   <button type="button" className="btn btn-primary btn-wide" onClick={nextHand}>
                     СЛЕДУЮЩАЯ РАЗДАЧА
+                    {t.autoNextIn !== null && ` · ${Math.ceil(t.autoNextIn / 1000)}`}
                   </button>
+                )}
+                {t.autoNextIn !== null && (
+                  <p className="auto-next">
+                    Следующая раздача через {Math.max(1, Math.ceil(t.autoNextIn / 1000))} сек…
+                  </p>
                 )}
                 <button type="button" className="btn btn-outline btn-wide"
                   onClick={() => { close(); t.replayExact(); }}>
                   ПЕРЕИГРАТЬ РАЗДАЧУ
                 </button>
-                <button type="button" className="btn btn-outline btn-wide" onClick={() => setAnalysis(true)}>
+                <button type="button" className="btn btn-outline btn-wide" onClick={openAnalysis}>
                   ПОДРОБНЫЙ РАЗБОР
                 </button>
                 {!limit && t.totals.decisions > 0 && (
@@ -193,6 +213,15 @@ export default function App() {
             </div>
           )}
 
+          <label className="pause-next" title="Раздача закончится как обычно, но следующая сама не начнётся">
+            <input
+              type="checkbox"
+              checked={t.pauseNext}
+              onChange={(e) => t.setPauseNext(e.target.checked)}
+            />
+            <span>ОТЛОЖИТЬ СЛЕДУЮЩУЮ РАЗДАЧУ</span>
+          </label>
+
           {t.coachThinking && <div className="coach-thinking">Тренер анализирует решение…</div>}
           <CoachPanel review={t.lastReview} handReviews={t.handReviews} />
         </aside>
@@ -218,7 +247,7 @@ export default function App() {
                 ) : (
                   <button type="button" className="btn btn-primary" onClick={nextHand}>СЛЕДУЮЩАЯ РАЗДАЧА</button>
                 )}
-                <button type="button" className="btn btn-outline" onClick={() => setAnalysis(true)}>РАЗБОР</button>
+                <button type="button" className="btn btn-outline" onClick={openAnalysis}>РАЗБОР</button>
               </>
             ) : (
               <span className="waiting">{t.replaying ? 'Повторяю сыгранное…' : 'Ход соперника…'}</span>

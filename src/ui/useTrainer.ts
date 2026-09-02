@@ -16,6 +16,8 @@ import {
   addDecision, isGood, isMajor, isMistake, loadProgress, resetProgress, saveProgress,
   type Progress, type SessionEntry,
 } from '../app/progress';
+import type { LoggedDecision, LoggedHand, SessionLog } from '../app/sessionLog';
+import { AutoNext, browserTimer } from '../app/autoNext';
 
 /** Пауза между ходами ботов — чтобы за столом читалось, кто что сделал. */
 const BOT_DELAY_MS = 560;
@@ -28,6 +30,8 @@ const REPLAY_DELAY_MS = 420;
  * чем четверть секунды ожидания.
  */
 const THINKING_VISIBLE_AFTER_MS = 200;
+
+
 
 export type Screen = 'start' | 'table' | 'summary' | 'progress' | 'mistakes';
 
@@ -65,6 +69,10 @@ export interface Trainer {
   isReplay: boolean;
   /** Сессия отыграла свои раздачи и ждёт, когда игрок откроет итог. */
   sessionComplete: boolean;
+  /** Игрок попросил не начинать следующую раздачу самому. */
+  pauseNext: boolean;
+  /** Через сколько миллисекунд начнётся следующая раздача; null — не начнётся. */
+  autoNextIn: number | null;
 
   start: (mode: TrainerMode, stackMode: StackMode) => void;
   act: (request: ActionRequest) => void;
@@ -75,6 +83,12 @@ export interface Trainer {
   goto: (screen: Screen) => void;
   finishSession: () => void;
   wipeProgress: () => void;
+  /** Переключить «отложить следующую раздачу». Отменяет и уже идущий отсчёт. */
+  setPauseNext: (on: boolean) => void;
+  /** Отменить автопереход: игрок открыл разбор и хочет читать. */
+  holdAutoNext: () => void;
+  /** Полная запись сессии для выгрузки. */
+  sessionLog: () => SessionLog;
 }
 
 const HERO_NAME = 'withorwithout';
@@ -107,12 +121,27 @@ export function useTrainer(): Trainer {
   const replayQueue = useRef<ActionRequest[]>([]);
   const counted = useRef(false);
 
+  // Автопереход к следующей раздаче. Вся защита от гонок — внутри планировщика.
+  const auto = useRef<AutoNext | null>(null);
+
+  // Запись сессии для выгрузки.
+  const sessionId = useRef('');
+  const sessionStartedAt = useRef(Date.now());
+  const hands = useRef<LoggedHand[]>([]);
+  const currentHand = useRef<LoggedHand | null>(null);
+  const replayCounts = useRef(new Map<number, number>());
+
   if (session.current === null) {
     session.current = newSession({
       heroName: HERO_NAME, stackMode: 'standard',
       smallBlind: 2, bigBlind: 4, seed: freshSeed(),
     });
     currentSetup.current = handSetupOf(session.current);
+    sessionId.current = `s${Date.now().toString(36)}`;
+  }
+
+  if (auto.current === null) {
+    auto.current = new AutoNext(browserTimer, (wasAuto) => startNextHand(wasAuto));
   }
 
   /* ---------------- учёт закончившейся раздачи ---------------- */
@@ -132,12 +161,26 @@ export function useTrainer(): Trainer {
     saveProgress(progress.current);
   }, []);
 
+  /** Снять запланированный автопереход. */
+  const cancelAuto = useCallback(() => {
+    auto.current?.cancel();
+  }, []);
+
   const closeHand = useCallback(() => {
     const s = session.current!;
+    if (counted.current) return;
+    counted.current = true;
+
+    // Раздача дописывается в журнал сессии в любом случае — и переигранная
+    // тоже, но помеченной: по ней потом видно, что переигрывание было.
+    finishHandLog();
+
     // Переигранная раздача — учебная. Она не идёт ни в деньги, ни в статистику:
     // иначе одну и ту же руку можно было бы «выиграть» пять раз подряд.
-    if (isReplay.current || counted.current) return;
-    counted.current = true;
+    if (isReplay.current) {
+      scheduleAuto();
+      return;
+    }
 
     netTotal.current += s.state.result ? (s.state.result.net[HERO_SEAT] ?? 0) : 0;
     handsPlayed.current += 1;
@@ -148,7 +191,13 @@ export function useTrainer(): Trainer {
     // должен успеть посмотреть, чем всё закончилось, и при желании её
     // переиграть. Итог откроется по кнопке.
     const limit = mode.current.handLimit;
-    if (limit && handsPlayed.current >= limit) recordSession();
+    if (limit && handsPlayed.current >= limit) {
+      recordSession();
+      // Сессия отыграна: следующая раздача не начинается сама ни при каких
+      // настройках. Дальше только итог.
+      return;
+    }
+    scheduleAuto();
   }, [recordSession]);
 
   /* ---------------- ходы ботов и очередь переигрывания ---------------- */
@@ -192,10 +241,99 @@ export function useTrainer(): Trainer {
     };
   });
 
+  /* ---------------- журнал сессии ---------------- */
+
+  /** Открыть запись новой раздачи. */
+  const startHandLog = useCallback((wasAuto: boolean) => {
+    const s = session.current!;
+    currentHand.current = {
+      handNumber: s.handNumber,
+      setup: handSetupOf(s),
+      seats: s.state.players.map((p) => ({
+        seat: p.seat,
+        name: p.name,
+        isHero: p.seat === HERO_SEAT,
+        position: p.position,
+        startingStackCents: p.startingStack,
+        endingStackCents: p.startingStack,
+      })),
+      heroSeat: HERO_SEAT,
+      heroCards: [...s.state.players[HERO_SEAT].cards] as [number, number],
+      board: [],
+      log: [],
+      decisions: [],
+      result: null,
+      heroNetCents: 0,
+      potCents: 0,
+      showdown: false,
+      actualHoleCards: [],
+      startedAt: Date.now(),
+      endedAt: 0,
+      autoAdvanced: wasAuto,
+      pausedAfter: false,
+      isReplay: isReplay.current,
+      replayCount: 0,
+    };
+  }, []);
+
+  /** Закрыть запись раздачи: доснять всё, что известно только в конце. */
+  const finishHandLog = useCallback(() => {
+    const h = currentHand.current;
+    if (!h) return;
+    const s = session.current!;
+    const result = s.state.result;
+    const shown = result ? result.showdownSeats : [];
+
+    h.board = s.state.board.slice();
+    h.log = s.state.log.slice();
+    h.result = result;
+    h.heroNetCents = result ? (result.net[HERO_SEAT] ?? 0) : 0;
+    h.potCents = s.state.players.reduce((a, p) => a + p.handCommit, 0);
+    h.showdown = shown.length > 1;
+    h.endedAt = Date.now();
+    h.pausedAfter = auto.current?.isPaused ?? false;
+    h.seats = h.seats.map((seat) => ({
+      ...seat,
+      endingStackCents: s.state.players[seat.seat].stack,
+    }));
+    // Настоящие карты — отдельно от слепков решений и с пометкой, видел ли их
+    // герой на самом деле.
+    h.actualHoleCards = s.state.players
+      .filter((p) => p.cards[0] >= 0)
+      .map((p) => ({
+        seat: p.seat,
+        name: p.name,
+        cards: [...p.cards],
+        revealedToHero: p.seat === HERO_SEAT || shown.includes(p.seat),
+      }));
+
+    if (h.isReplay) {
+      const seen = replayCounts.current.get(h.handNumber) ?? 0;
+      replayCounts.current.set(h.handNumber, seen + 1);
+      h.replayCount = seen + 1;
+    }
+    hands.current.push(h);
+    currentHand.current = null;
+  }, []);
+
+  /* ---------------- автопереход ---------------- */
+
+  /**
+   * Запланировать следующую раздачу.
+   *
+   * Отсчёт начинается не сразу: сперва даём доиграть финалу прошлой руки —
+   * вскрытию, награждению, уходу карт в мак, — чтобы звуки и движение двух
+   * раздач не накладывались.
+   */
+  const scheduleAuto = useCallback(() => {
+    auto.current?.schedule();
+  }, []);
+
   /* ---------------- раздачи ---------------- */
 
-  const beginHand = useCallback(() => {
+  const beginHand = useCallback((wasAuto = false) => {
     const s = session.current!;
+    cancelAuto();
     handReviews.current = [];
     lastReview.current = null;
     heroActions.current = [];
@@ -212,7 +350,18 @@ export function useTrainer(): Trainer {
       dealNext(s);
     }
     currentSetup.current = handSetupOf(s);
-  }, []);
+    startHandLog(wasAuto);
+  }, [cancelAuto, startHandLog]);
+
+  /**
+   * Начать следующую раздачу. Единственная дверь: и кнопка, и таймер ходят
+   * через неё, поэтому двух раздач подряд из-за двойного клика не выйдет.
+   */
+  const startNextHand = useCallback((wasAuto: boolean) => {
+    cancelAuto();
+    beginHand(wasAuto);
+    force();
+  }, [beginHand, cancelAuto]);
 
   /* ---------------- действие героя ---------------- */
 
@@ -227,6 +376,10 @@ export function useTrainer(): Trainer {
     const pot = totalPot(s.state);
     const prior = heroActions.current.slice();
     const replay = isReplay.current;
+    // Запись раздачи запоминается СЕЙЧАС. Разбор считается следующим кадром, и
+    // к тому моменту раздача может уже закрыться — тогда последнее решение,
+    // часто самое интересное, не попало бы в выгрузку вовсе.
+    const handLog = currentHand.current;
 
     heroActions.current.push(request);
     heroAct(s, request);
@@ -262,6 +415,20 @@ export function useTrainer(): Trainer {
       };
       lastReview.current = record;
       handReviews.current.push(record);
+
+      // В журнал сессии — и слепок, и вердикт: ровно то, из чего тренер
+      // сделал вывод. Переигранные решения тоже пишутся, но раздача помечена.
+      const logged: LoggedDecision = {
+        index: handReviews.current.length - 1,
+        street,
+        snapshot: snap,
+        chosen: { kind: request.kind, totalCents: request.total },
+        verdict,
+        categories: record.categories,
+        villain,
+        atMs: Date.now() - sessionStartedAt.current,
+      };
+      handLog?.decisions.push(logged);
 
       if (!replay) {
         sessionRecords.current.push(record);
@@ -304,6 +471,9 @@ export function useTrainer(): Trainer {
 
   const replayFrom = useCallback((setup: HandSetup, actions: ActionRequest[]) => {
     const s = session.current!;
+    // Переигрывание отменяет запланированный переход: новая раздача не должна
+    // стартовать поверх него.
+    auto.current?.setPaused(false);
     restoreHand(s, setup);
     handReviews.current = [];
     lastReview.current = null;
@@ -313,8 +483,9 @@ export function useTrainer(): Trainer {
     isReplay.current = true;
     counted.current = false;
     screen.current = 'table';
+    startHandLog(false);
     force();
-  }, []);
+  }, [cancelAuto, startHandLog]);
 
   return {
     screen: screen.current,
@@ -331,6 +502,8 @@ export function useTrainer(): Trainer {
     isReplay: isReplay.current,
     sessionComplete: mode.current.handLimit !== undefined
       && handsPlayed.current >= mode.current.handLimit,
+    pauseNext: auto.current!.isPaused,
+    autoNextIn: auto.current!.remaining,
     totals: totalsOf(sessionRecords.current, handsPlayed.current, netTotal.current),
 
     start(nextMode, nextStacks) {
@@ -350,6 +523,13 @@ export function useTrainer(): Trainer {
       sessionRecords.current = [];
       handsPlayed.current = 0;
       netTotal.current = 0;
+      // Новая сессия — новый журнал.
+      auto.current!.setPaused(false);
+      hands.current = [];
+      currentHand.current = null;
+      replayCounts.current = new Map();
+      sessionId.current = `s${Date.now().toString(36)}`;
+      sessionStartedAt.current = Date.now();
       screen.current = 'table';
       beginHand();
       force();
@@ -358,9 +538,40 @@ export function useTrainer(): Trainer {
     act: doAct,
 
     nextHand() {
-      // Из переигранной раздачи возвращаемся в обычный ход сессии.
-      beginHand();
+      // Единственная дверь для ручного перехода: пауза при этом сбрасывается,
+      // и следующая обычная раздача снова продолжится сама.
+      auto.current!.manual();
+    },
+
+    setPauseNext(on) {
+      // Пауза во время отсчёта обязана его отменять, а не «почти успевать».
+      auto.current!.setPaused(on);
+      if (!on && session.current!.state.finished && screen.current === 'table') scheduleAuto();
+      if (currentHand.current) currentHand.current.pausedAfter = on;
       force();
+    },
+
+    holdAutoNext() {
+      // Игрок открыл подробный разбор — значит хочет читать, а не гнаться за
+      // таймером. Считаем это тем же, что и пауза.
+      auto.current!.hold();
+      force();
+    },
+
+    sessionLog(): SessionLog {
+      const m = mode.current;
+      return {
+        id: sessionId.current || `s${sessionStartedAt.current.toString(36)}`,
+        mode: m.kind,
+        modeDetail: m.category ?? m.villain ?? null,
+        targetHands: m.handLimit ?? null,
+        startedAt: sessionStartedAt.current,
+        endedAt: Date.now(),
+        smallBlindCents: session.current!.config.smallBlind,
+        bigBlindCents: session.current!.config.bigBlind,
+        heroName: HERO_NAME,
+        hands: hands.current,
+      };
     },
 
     replayExact() {

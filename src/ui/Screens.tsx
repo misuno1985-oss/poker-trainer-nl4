@@ -3,6 +3,9 @@ import { money, type StackMode } from '../game/stacks';
 import { CardText } from './CardText';
 import { ALL_CATEGORIES, CATEGORY_HINTS, CATEGORY_TITLES, type CategoryId } from '../coach/categories';
 import { buildSessionSummary } from '../coach/summary';
+import { buildExport, exportFileName, type SessionLog } from '../app/sessionLog';
+import { downloadJson } from '../app/download';
+import { PROFILES } from '../bots/profiles';
 import { VILLAIN_NAMES, type TrainerMode } from '../app/trainer';
 import {
   MIN_FOR_TREND, averageScore, tally, trendFor, versusTable, type Progress,
@@ -156,13 +159,16 @@ function ModeCard({ title, hint, onClick, primary }: {
 /* Итог сессии                                                         */
 /* ================================================================== */
 
-export function SummaryScreen({ totals, onRestart, onHome, onMistakes }: {
+export function SummaryScreen({ totals, progress, sessionLog, onRestart, onHome, onMistakes }: {
   totals: SessionTotals;
+  progress: Progress;
+  sessionLog: () => SessionLog;
   onRestart: () => void;
   onHome: () => void;
   onMistakes: () => void;
 }) {
   const summary = buildSessionSummary(totals.records);
+  const [saved, setSaved] = useState<string | null>(null);
   const cats = ALL_CATEGORIES
     .map((c) => ({ c, t: tallyOf(totals, c) }))
     .filter((x) => x.t.total > 0);
@@ -244,12 +250,86 @@ export function SummaryScreen({ totals, onRestart, onHome, onMistakes }: {
 
       <div className="sheet-actions">
         <button type="button" className="btn btn-primary" onClick={onRestart}>Ещё раз</button>
+        <button
+          type="button"
+          className="btn btn-outline"
+          onClick={() => {
+            const log = sessionLog();
+            const now = Date.now();
+            const name = exportFileName(log, now);
+            // Только данные тренажёра: ни настроек, ни хранилища, ни чего-либо
+            // ещё со страницы.
+            downloadJson(name, buildExport(log, summaryInput(totals, summary, progress, log), PROFILES, now));
+            setSaved(name);
+          }}
+        >
+          ВЫГРУЗИТЬ СЕССИЮ
+        </button>
         <button type="button" className="btn btn-outline" onClick={onMistakes}>Крупные ошибки</button>
         <button type="button" className="btn btn-ghost" onClick={onHome}>В меню</button>
       </div>
+
+      {saved && (
+        <p className="fineprint">
+          Сохранено: <strong>{saved}</strong>. В файле — каждая раздача, каждое твоё решение,
+          что видел тренер и что он посчитал. Его можно отдать на разбор кому угодно.
+        </p>
+      )}
     </div>
   );
 }
+
+
+/**
+ * Данные итога для выгрузки — ровно те, что показаны на экране.
+ * Ничего не пересчитывается: цифры берутся из уже готового итога.
+ */
+function summaryInput(
+  totals: SessionTotals,
+  summary: ReturnType<typeof buildSessionSummary>,
+  progress: Progress,
+  log: SessionLog,
+) {
+  const handOf = new Map<number, number>();
+  for (const h of log.hands) {
+    if (h.isReplay) continue;
+    for (const d of h.decisions) handOf.set(d.atMs, h.handNumber);
+  }
+
+  return {
+    decisionScore: Number(totals.score.toFixed(2)),
+    netCents: totals.net,
+    good: totals.good,
+    borderline: totals.borderline,
+    mistakes: totals.mistakes,
+    major: totals.major,
+    insights: summary.insights,
+    focus: summary.focus,
+    focusReason: summary.focusReason,
+    categories: ALL_CATEGORIES.map((c) => {
+      const t = tallyOf(totals, c);
+      return { id: c, title: CATEGORY_TITLES[c], total: t.total, good: t.good, mistakes: t.mistakes };
+    }).filter((c) => c.total > 0),
+    // Крупные ошибки именно этой сессии: у них есть зерно раздачи из журнала.
+    majorMistakes: progress.mistakes
+      .filter((m) => log.hands.some((h) => !h.isReplay && h.setup.seed === m.setup.seed))
+      .map((m) => ({
+        handNumber: m.setup.handNumber,
+        street: m.street,
+        scoreValue: m.score,
+        heroCards: m.heroCards.map(cardLabel),
+        board: m.board.map(cardLabel),
+        position: m.position,
+        villain: m.villain,
+        did: m.did,
+        better: m.better,
+      })),
+  };
+}
+
+const RANK_TEXT = '23456789TJQKA';
+const SUIT_TEXT = 'cdhs';
+const cardLabel = (c: number) => (c < 0 ? '' : RANK_TEXT[c >> 2] + SUIT_TEXT[c & 3]);
 
 function tallyOf(totals: SessionTotals, c: CategoryId) {
   return tally(
