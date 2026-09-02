@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { PlayingCard, CardBack } from './PlayingCard';
 import { BetMarker } from './BetMarker';
+import { DealerButton, dealerSpot } from './DealerButton';
 import { TABLE_CENTER, betSpots, type BetSpot } from './betMarkers';
 import { useTableFit } from './useTableFit';
+import { DEAL_STAGGER_MS } from './tableTimeline';
+import type { TableAnim } from './useTableTimeline';
 import { money } from '../game/stacks';
 import { totalPot } from '../game/types';
 import { HERO_SEAT, seatViews, type Session, type SeatView } from '../app/session';
@@ -32,14 +35,31 @@ const SEAT_COORDS_NARROW = [
   { x: 83, y: 74 },
 ];
 
+
+/**
+ * Направление «от места к центру стола» в пикселях.
+ *
+ * Проценты по осям неравнозначны: стол шире, чем выше, поэтому 1% по X — это
+ * больше пикселей, чем 1% по Y. Без поправки карты нижних мест улетали бы в
+ * мак под другим углом, чем боковых.
+ */
+function towardCentre(seat: { x: number; y: number }, distance: number) {
+  const dx = (50 - seat.x) * 1.6;
+  const dy = 50 - seat.y;
+  const len = Math.hypot(dx, dy) || 1;
+  return { x: (dx / len) * distance, y: (dy / len) * distance };
+}
+
 interface Props {
   session: Session;
   narrow: boolean;
   showAllCards: boolean;
+  /** Состояние анимаций: его считает таймлайн, стол только рисует. */
+  anim: TableAnim;
   onInfo: (name: string) => void;
 }
 
-export function Table({ session, narrow, showAllCards, onInfo }: Props) {
+export function Table({ session, narrow, showAllCards, anim, onInfo }: Props) {
   const state = session.state;
   const views = seatViews(session);
   const coords = narrow ? SEAT_COORDS_NARROW : SEAT_COORDS;
@@ -48,11 +68,12 @@ export function Table({ session, narrow, showAllCards, onInfo }: Props) {
   // помещается по высоте, и панель кнопок не наезжает на место героя.
   const [wrapRef, fitWidth] = useTableFit(16 / 10, 920, !narrow);
   const spots = betSpots(views, coords, narrow, state.bigBlind);
+  const dealtAt = (seat: number) => anim.dealt.indexOf(seat);
   // У героя подпись действия стоит НАД картами, то есть ровно там, куда на
   // узком экране приходит его маркер. Дублировать нечего: маркер говорит то же
   // самое и точнее, поэтому подпись героя уступает ему место.
   const heroHasMarker = spots.some((s2) => s2.seat === HERO_SEAT);
-  const flying = useCollectAnimation(spots, state.street, session.handNumber);
+  const flying = useCollectAnimation(spots, anim.collecting);
   const streetLabel = { preflop: 'PREFLOP', flop: 'FLOP', turn: 'TURN', river: 'RIVER', showdown: 'SHOWDOWN' }[state.street];
 
   return (
@@ -65,8 +86,13 @@ export function Table({ session, narrow, showAllCards, onInfo }: Props) {
             <div className="board">
               {[0, 1, 2, 3, 4].map((i) => (
                 <div key={i} className={`board-slot ${i === 3 ? 'board-gap' : ''}`}>
-                  {state.board[i] !== undefined ? (
-                    <PlayingCard card={state.board[i]} size={narrow ? 'sm' : 'md'} />
+                  {state.board[i] !== undefined && i < anim.boardShown ? (
+                    <PlayingCard
+                      key={`${session.handNumber}-${state.board[i]}`}
+                      card={state.board[i]}
+                      size={narrow ? 'sm' : 'md'}
+                      motion={anim.boardEntering.includes(i) ? 'card-deal-board' : undefined}
+                    />
                   ) : (
                     <div className={`card card-${narrow ? 'sm' : 'md'} card-hidden`} />
                   )}
@@ -83,13 +109,20 @@ export function Table({ session, narrow, showAllCards, onInfo }: Props) {
       </div>
 
       {spots.map((s2) => (
-        <BetMarker key={`bet-${s2.seat}`} spot={s2} />
+        <BetMarker
+          key={`bet-${s2.seat}`}
+          spot={s2}
+          from={towardCentre(coords[s2.seat], narrow ? -18 : -24)}
+          motion={anim.chips.includes(s2.seat) ? 'bet-arriving' : undefined}
+        />
       ))}
 
       {/* Уехавшие в банк фишки прошлой улицы: только показать, что они ушли. */}
       {flying.map((s2) => (
         <BetMarker key={`fly-${s2.seat}`} spot={s2} flying />
       ))}
+
+      <DealerButton spot={dealerSpot(coords[anim.button], narrow, anim.button === HERO_SEAT)} />
 
       {views.map((v) => (
         <SeatBox
@@ -101,6 +134,12 @@ export function Table({ session, narrow, showAllCards, onInfo }: Props) {
           reveal={showAllCards || v.isHero}
           bigBlind={state.bigBlind}
           hideAction={narrow && v.isHero && heroHasMarker}
+          dealtAt={dealtAt(v.seat)}
+          entering={anim.entering.includes(v.seat)}
+          folding={anim.folding.includes(v.seat)}
+          revealing={anim.revealing.includes(v.seat)}
+          awarded={anim.awarding === v.seat}
+          handKey={session.handNumber}
           onInfo={onInfo}
         />
       ))}
@@ -116,18 +155,45 @@ interface SeatProps {
   reveal: boolean;
   bigBlind: number;
   hideAction: boolean;
+  /** Каким по счёту месту раздали карты; -1 — ещё не раздали. */
+  dealtAt: number;
+  /** Карты этого места появились по событию раздачи, а не прыжком. */
+  entering: boolean;
+  folding: boolean;
+  revealing: boolean;
+  awarded: boolean;
+  handKey: number;
   onInfo: (name: string) => void;
 }
 
-function SeatBox({ view, x, y, narrow, reveal, hideAction, onInfo }: SeatProps) {
+function SeatBox({
+  view, x, y, narrow, reveal, hideAction, dealtAt, entering, folding, revealing, awarded, handKey, onInfo,
+}: SeatProps) {
   const classes = [
     'seat',
     view.isHero ? 'seat-hero' : '',
-    view.folded ? 'seat-folded' : '',
+    // Пока карты уходят в мак, место ещё не «сброшенное»: иначе оно потускнеет
+    // раньше, чем карты доедут.
+    view.folded && !folding ? 'seat-folded' : '',
     view.isToAct ? 'seat-active' : '',
-  ].join(' ');
+    awarded ? 'seat-awarded' : '',
+  ].filter(Boolean).join(' ');
 
-  const showCards = !view.folded && view.cards[0] >= 0;
+  // Карты видно, когда дилер до этого места дошёл, и пока они не уехали в мак.
+  const showCards = dealtAt >= 0 && view.cards[0] >= 0 && (!view.folded || folding);
+  const motion = folding ? 'card-muck' : entering ? 'card-deal' : '';
+  const delay = folding || !entering ? 0 : dealtAt * DEAL_STAGGER_MS;
+  const size = view.isHero && !narrow ? 'md' : 'sm';
+
+  // Карты приходят со стороны центра и туда же уходят в мак — у каждого места
+  // своё направление, как и у фишек.
+  const muck = towardCentre({ x, y }, narrow ? 20 : 26);
+  const vars = {
+    '--muck-x': `${muck.x.toFixed(1)}px`,
+    '--muck-y': `${muck.y.toFixed(1)}px`,
+    '--deal-x': `${(-muck.x * 0.7).toFixed(1)}px`,
+    '--deal-y': `${(-muck.y * 0.7).toFixed(1)}px`,
+  } as React.CSSProperties;
 
   // Подпись действия у героя стоит НАД картами (он внизу экрана), у остальных —
   // под табличкой. Так она всегда смотрит в сторону центра стола.
@@ -138,20 +204,22 @@ function SeatBox({ view, x, y, narrow, reveal, hideAction, onInfo }: SeatProps) 
   );
 
   return (
-    <div className={classes} style={{ left: `${x}%`, top: `${y}%` }}>
+    <div className={classes} style={{ left: `${x}%`, top: `${y}%`, ...vars }}>
       {view.isHero && label}
 
-      <div className="seat-cards">
+      <div className={`seat-cards ${folding ? 'seat-cards-muck' : ''}`}>
         {showCards ? (
           reveal ? (
             <>
-              <PlayingCard card={view.cards[0]} size={view.isHero && !narrow ? 'md' : 'sm'} />
-              <PlayingCard card={view.cards[1]} size={view.isHero && !narrow ? 'md' : 'sm'} />
+              <PlayingCard key={`${handKey}-a`} card={view.cards[0]} size={size}
+                motion={revealing ? 'card-reveal' : motion} delayMs={delay} />
+              <PlayingCard key={`${handKey}-b`} card={view.cards[1]} size={size}
+                motion={revealing ? 'card-reveal' : motion} delayMs={delay} />
             </>
           ) : (
             <>
-              <CardBack size="sm" />
-              <CardBack size="sm" />
+              <CardBack key={`${handKey}-a`} size="sm" motion={motion} delayMs={delay} />
+              <CardBack key={`${handKey}-b`} size="sm" motion={motion} delayMs={delay} />
             </>
           )
         ) : null}
@@ -186,30 +254,31 @@ function SeatBox({ view, x, y, narrow, reveal, hideAction, onInfo }: SeatProps) 
 }
 
 /**
- * Короткий переезд фишек в центр при смене улицы.
+ * Короткий переезд фишек в центр при сборе банка.
  *
- * Только оформление: банк в `totalPot` и так считается по `handCommit`, то есть
- * уже включает ставки текущей улицы, и в момент перехода его число не меняется.
- * Анимация показывает, куда девались фишки, и ничего не пересчитывает.
+ * Момент переезда задаёт таймлайн — тот же, что играет звук сбора, поэтому
+ * движение и звук начинаются вместе. Само по себе это только оформление: банк
+ * в `totalPot` считается по `handCommit` и уже включает ставки текущей улицы,
+ * так что в момент перехода его число не меняется.
  */
-function useCollectAnimation(spots: BetSpot[], street: string, handNumber: number): BetSpot[] {
+function useCollectAnimation(spots: BetSpot[], collecting: boolean): BetSpot[] {
   const [flying, setFlying] = useState<BetSpot[]>([]);
-  const lastStreet = useRef(street);
-  const lastHand = useRef(handNumber);
   const lastSpots = useRef<BetSpot[]>(spots);
+  const wasCollecting = useRef(false);
 
   useEffect(() => {
-    const streetChanged = lastStreet.current !== street;
-    const newHand = lastHand.current !== handNumber;
-    const from = lastSpots.current;
-    lastStreet.current = street;
-    lastHand.current = handNumber;
-
-    // Новая раздача — не переезд, а обнуление: собирать нечего.
-    if (!streetChanged || newHand || from.length === 0) {
+    if (collecting === wasCollecting.current) {
+      if (!collecting) lastSpots.current = spots;
+      return;
+    }
+    wasCollecting.current = collecting;
+    if (!collecting) {
       setFlying([]);
       return;
     }
+
+    const from = lastSpots.current;
+    if (from.length === 0) return;
 
     setFlying(from.map((s) => ({ ...s })));
     // Второй кадр нужен, чтобы браузер успел отрисовать фишки на месте и
@@ -217,20 +286,7 @@ function useCollectAnimation(spots: BetSpot[], street: string, handNumber: numbe
     const raf = requestAnimationFrame(() => {
       setFlying((cur) => cur.map((s) => ({ ...s, x: TABLE_CENTER.x, y: TABLE_CENTER.y })));
     });
-    const timer = window.setTimeout(() => setFlying([]), 480);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.clearTimeout(timer);
-      // Обязательно убрать за собой: если улица сменилась раньше, чем фишки
-      // доехали, таймер отменяется вместе с уборкой, и прошлый переезд остался
-      // бы висеть в разметке навсегда.
-      setFlying([]);
-    };
-  }, [street, handNumber]);
-
-  // Обновляем снимок после эффекта перехода, чтобы он видел прошлую улицу.
-  useEffect(() => {
-    if (lastStreet.current === street) lastSpots.current = spots;
+    return () => cancelAnimationFrame(raf);
   });
 
   return flying;

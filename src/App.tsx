@@ -6,7 +6,7 @@ import { CoachPanel } from './ui/CoachPanel';
 import { HandAnalysis } from './ui/HandAnalysis';
 import { MistakesScreen, ProgressScreen, StartScreen, SummaryScreen } from './ui/Screens';
 import { SoundToggle } from './ui/SoundToggle';
-import { useTableSounds } from './ui/useTableSounds';
+import { useTableTimeline } from './ui/useTableTimeline';
 import { useNarrow } from './ui/useNarrow';
 import { useTrainer } from './ui/useTrainer';
 import { HERO_SEAT, heroLegal, isHeroTurn, type Session } from './app/session';
@@ -21,9 +21,10 @@ export default function App() {
   const [info, setInfo] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState(false);
   const t = useTrainer();
-  // Звук слушает протокол раздачи, а не кнопки: ходы соперников и
-  // переигрывание звучат так же, как свои ходы.
-  useTableSounds(t.session, t.screen === 'table');
+  // Один таймлайн на стол: и движение, и звук считаются от изменений состояния
+  // раздачи, а не от нажатых кнопок. Поэтому ходы соперников и переигрывание
+  // выглядят и звучат так же, как свои ходы.
+  const anim = useTableTimeline(t.session, t.screen === 'table');
 
   const close = () => setAnalysis(false);
 
@@ -124,6 +125,7 @@ export default function App() {
             session={session}
             narrow={narrow}
             showAllCards={!!result && result.showdownSeats.length > 1}
+            anim={anim}
             onInfo={setInfo}
           />
         </main>

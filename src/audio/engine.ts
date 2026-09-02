@@ -92,6 +92,31 @@ function chipRun(c: Ctx, at: number, gain: number, count: number, spread: number
 }
 
 /**
+ * Короткий шорох карты: скользнула по сукну. Из него собраны и раздача, и
+ * карта борда, и раскрытие — разной длины и яркости.
+ */
+function cardSlide(c: Ctx, at: number, gain: number, cut: number, dur: number): void {
+  const src = c.ctx.createBufferSource();
+  src.buffer = c.noise;
+  src.playbackRate.value = 0.9 + Math.random() * 0.3;
+
+  const bp = c.ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.setValueAtTime(cut, at);
+  bp.frequency.exponentialRampToValueAtTime(cut * 0.5, at + dur);
+  bp.Q.value = 0.8;
+
+  const env = c.ctx.createGain();
+  env.gain.setValueAtTime(0, at);
+  env.gain.linearRampToValueAtTime(gain, at + 0.006);
+  env.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+
+  src.connect(bp).connect(env).connect(c.master);
+  src.start(at, Math.random() * (NOISE_SECONDS - dur - 0.01));
+  src.stop(at + dur + 0.02);
+}
+
+/**
  * Сброс карт. Ради него всё и затевалось: по этому звуку должно быть понятно,
  * что кто-то выбросил карты, даже если не смотреть на подпись действия.
  * Поэтому он не из семейства фишек — это шлепок бумаги о сукно.
@@ -142,6 +167,9 @@ function render(c: Ctx, name: Name, gain: number): void {
     case 'fold': cardDrop(c, t, gain); break;
     case 'check': chip(c, t, gain, 1500, 0.02); break;
     case 'collect': sweep(c, t, gain, 3200, 700, 0.19); break;
+    case 'deal': cardSlide(c, t, gain, 3400, 0.045); break;
+    case 'card': cardSlide(c, t, gain, 2600, 0.075); thump(c, t + 0.01, gain * 0.3, 190, 0.05); break;
+    case 'reveal': cardSlide(c, t, gain, 3000, 0.06); break;
     case 'win':
       chipRun(c, t, gain, 5, 0.24);
       break;

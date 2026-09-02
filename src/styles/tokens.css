@@ -306,35 +306,56 @@ h1, h2 { margin: 0; }
 
 /* ---------------- cards ---------------- */
 
+/* Карта собрана по присланному образцу: белое поле, тонкая серая рамка,
+   достоинство с маленькой мастью в левом верхнем углу и одна крупная масть в
+   середине. Всё в em от кегля карты, поэтому три её размера — это ровно один
+   и тот же рисунок в трёх масштабах. */
 .card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(180deg, #ffffff, #eef1f6);
-  border-radius: 5px;
-  border: 1px solid rgba(0, 0, 0, 0.35);
-  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.45);
-  color: #12151c;
+  position: relative;
+  display: block;
+  background: #ffffff;
+  border-radius: 6px;
+  border: 1px solid #9aa3b2;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  color: #14181f;
   font-family: 'Inter', system-ui, sans-serif;
   font-weight: 700;
   padding: 0;
   line-height: 1;
+  overflow: hidden;
 }
 .card-clickable { cursor: pointer; }
 .card-clickable:hover { transform: translateY(-2px); transition: transform 100ms ease; }
-.card-red { color: #d0342c; }
+.card-red { color: #cf2f2b; }
 .card-black { color: #14181f; }
 
-.card-sm { width: 30px; height: 42px; font-size: 13px; }
-.card-sm .card-suit { font-size: 13px; }
+.card-sm { width: 30px; height: 42px; font-size: 13px; border-radius: 4px; }
 .card-md { width: 48px; height: 68px; font-size: 21px; }
-.card-md .card-suit { font-size: 20px; }
 .card-lg { width: 62px; height: 88px; font-size: 28px; }
-.card-lg .card-suit { font-size: 24px; }
 
-.card-rank { letter-spacing: -0.02em; }
-.card-suit { margin-top: 2px; }
+.card-corner {
+  position: absolute;
+  top: 0.1em;
+  left: 0.16em;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 0.98;
+}
+
+.card-rank { font-size: 0.86em; letter-spacing: -0.03em; }
+.card-pip { font-size: 0.56em; margin-top: 0.05em; }
+
+/* Крупная масть — по центру по горизонтали и ниже середины по вертикали,
+   как на образце. */
+.card-face {
+  position: absolute;
+  left: 50%;
+  bottom: 0.18em;
+  transform: translateX(-50%);
+  font-size: 1.16em;
+  line-height: 1;
+}
 
 .card-empty {
   background: rgba(255, 255, 255, 0.07);
@@ -342,7 +363,11 @@ h1, h2 { margin: 0; }
   box-shadow: none;
   color: rgba(255, 255, 255, 0.5);
 }
-.card-plus { font-size: 16px; font-weight: 400; }
+.card-plus {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; font-weight: 400;
+}
 
 .card-back {
   background:

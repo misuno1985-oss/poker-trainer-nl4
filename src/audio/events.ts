@@ -18,7 +18,13 @@ export type SoundName =
   | 'allin'
   | 'fold'
   | 'collect'
-  | 'win';
+  | 'win'
+  /** Карта легла игроку при раздаче — очень тихо. */
+  | 'deal'
+  /** Карта борда. */
+  | 'card'
+  /** Раскрытие чужих карт на вскрытии. */
+  | 'reveal';
 
 /** Звук одного действия. null — событие, которое озвучивать не нужно. */
 export function soundForAction(action: Action): SoundName | null {

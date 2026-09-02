@@ -46,6 +46,9 @@ const RELATIVE: Record<SoundName, number> = {
   fold: 0.75,
   collect: 0.6,
   win: 0.9,
+  deal: 0.3,
+  card: 0.55,
+  reveal: 0.45,
 };
 
 export interface Settings {

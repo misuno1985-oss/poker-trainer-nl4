@@ -869,4 +869,117 @@
 }
 
 /* «10» шире любой другой подписи, поэтому у неё свой кегль. */
-.card-ten .card-rank { font-size: 0.78em; letter-spacing: -0.06em; }
+.card-ten .card-rank { font-size: 0.74em; letter-spacing: -0.07em; }
+
+/* ================================================================== */
+/* Движение на столе                                                   */
+/* ================================================================== */
+
+/* Все анимации короткие и сдержанные: стол должен ожить, но игра не должна
+   ждать. Длительности продублированы в tableTimeline.ts — там же, где решается,
+   когда звучит соответствующий звук. */
+
+/* Раздача: карта приходит со стороны центра и садится на место. */
+@keyframes card-deal {
+  from { opacity: 0; transform: translate(var(--deal-x, 0), var(--deal-y, -18px)) scale(0.96); }
+  to   { opacity: 1; transform: none; }
+}
+
+.card-deal {
+  animation: card-deal 180ms ease-out both;
+}
+
+/* Карта борда приходит с той же стороны, что и раздача. */
+@keyframes card-deal-board {
+  from { opacity: 0; transform: translateY(-14px) scale(0.96); }
+  to   { opacity: 1; transform: none; }
+}
+
+.card-deal-board { animation: card-deal-board 170ms ease-out both; }
+
+/* Уход в мак: карты сдвигаются к центру стола и гаснут. Направление задаёт
+   само место — у каждого своё, как и у фишек. */
+@keyframes card-muck {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: translate(var(--muck-x, 0), var(--muck-y, -26px)) scale(0.9); }
+}
+
+.card-muck { animation: card-muck 210ms ease-in both; }
+
+/* Раскрытие на вскрытии: короткий поворот через ребро, без 3D-театра. */
+@keyframes card-reveal {
+  0%   { transform: scaleX(0.55); opacity: 0.35; }
+  60%  { transform: scaleX(1.04); opacity: 1; }
+  100% { transform: scaleX(1); opacity: 1; }
+}
+
+.card-reveal { animation: card-reveal 190ms ease-out both; }
+
+/* Место, которому достался банк, коротко подсвечивается. */
+@keyframes seat-awarded {
+  0%   { box-shadow: 0 0 0 0 rgba(240, 192, 90, 0); }
+  35%  { box-shadow: 0 0 0 4px rgba(240, 192, 90, 0.45); }
+  100% { box-shadow: 0 0 0 0 rgba(240, 192, 90, 0); }
+}
+
+.seat-awarded .seat-plate { animation: seat-awarded 360ms ease-out both; }
+
+/* Фишки приезжают от игрока к своему маркеру. Направление — от места к
+   центру, то есть обратное тому, куда смотрит маркер. */
+@keyframes bet-arriving {
+  from { opacity: 0.2; transform: translate(-50%, -50%) translate(var(--from-x, 0), var(--from-y, 14px)) scale(0.86); }
+  to   { opacity: 1; transform: translate(-50%, -50%); }
+}
+
+.bet-arriving { animation: bet-arriving 190ms ease-out both; }
+
+/* ---------------- кнопка дилера ---------------- */
+
+/* Белая шайба с буквой D — та самая, что лежит на настоящем столе. */
+.dealer-button {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #ffffff, #dfe4ec);
+  border: 1px solid #8b93a3;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.45);
+  color: #1a1f2b;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 2;
+  /* Переезд между раздачами: кнопка едет по сукну, а не телепортируется. */
+  transition: left 220ms ease, top 220ms ease;
+}
+
+@media (max-width: 900px) {
+  .dealer-button { width: 18px; height: 18px; font-size: 9.5px; }
+}
+
+/* ---------------- сумма на фишках ---------------- */
+
+/* Сумма стоит на тёмной таблетке, как на образце: так она читается на любом
+   сукне и не спорит с самими фишками. */
+.bet-amount {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(8, 14, 26, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  text-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Движение выключено, но состояние всё равно меняется — и звук остаётся. */
+  .card-deal, .card-deal-board, .card-muck, .card-reveal,
+  .bet-arriving, .seat-awarded .seat-plate {
+    animation-duration: 1ms;
+    animation-delay: 0ms;
+  }
+  .dealer-button { transition: none; }
+}

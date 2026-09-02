@@ -9,10 +9,21 @@ interface Props {
   onClick?: () => void;
   title?: string;
   disabled?: boolean;
+  /** Класс анимации: раздача, раскрытие, уход в мак. */
+  motion?: string;
+  /** Задержка анимации в миллисекундах — для последовательной раздачи. */
+  delayMs?: number;
 }
 
-/** A plain, familiar two-colour playing card. */
-export function PlayingCard({ card, size = 'md', onClick, title, disabled }: Props) {
+/**
+ * Игральная карта.
+ *
+ * Лицо собрано по присланному образцу: белое поле, тонкая серая рамка,
+ * достоинство в левом верхнем углу и под ним маленькая масть, а в середине —
+ * одна крупная масть. Никаких рисунков и вензелей: карта должна читаться
+ * мгновенно и с маленького размера.
+ */
+export function PlayingCard({ card, size = 'md', onClick, title, disabled, motion, delayMs }: Props) {
   const empty = card < 0;
   const suit = empty ? 0 : suitOf(card);
   const red = suit === 1 || suit === 2;
@@ -23,32 +34,46 @@ export function PlayingCard({ card, size = 'md', onClick, title, disabled }: Pro
     // «10» вдвое шире остальных подписей, и ей нужен свой размер.
     !empty && isTen(card) ? 'card-ten' : '',
     onClick ? 'card-clickable' : '',
-  ].join(' ');
+    motion ?? '',
+  ].filter(Boolean).join(' ');
+
+  const style = delayMs ? { animationDelay: `${delayMs}ms` } : undefined;
 
   const content = empty ? (
     <span className="card-plus">+</span>
   ) : (
     <>
-      <span className="card-rank">{cardRankLabel(card)}</span>
-      <span className="card-suit">{SUIT_SYMBOLS[suit]}</span>
+      <span className="card-corner">
+        <span className="card-rank">{cardRankLabel(card)}</span>
+        <span className="card-pip">{SUIT_SYMBOLS[suit]}</span>
+      </span>
+      <span className="card-face">{SUIT_SYMBOLS[suit]}</span>
     </>
   );
 
   if (onClick) {
     return (
-      <button type="button" className={className} onClick={onClick} title={title} disabled={disabled}>
+      <button type="button" className={className} style={style} onClick={onClick} title={title} disabled={disabled}>
         {content}
       </button>
     );
   }
   return (
-    <div className={className} title={title}>
+    <div className={className} style={style} title={title}>
       {content}
     </div>
   );
 }
 
-/** Face-down card, used for opponents with unknown holdings. */
-export function CardBack({ size = 'sm' }: { size?: CardSize }) {
-  return <div className={`card card-${size} card-back`} aria-hidden="true" />;
+/** Рубашка — для закрытых карт соперников. */
+export function CardBack({ size = 'sm', motion, delayMs }: {
+  size?: CardSize; motion?: string; delayMs?: number;
+}) {
+  return (
+    <div
+      className={['card', `card-${size}`, 'card-back', motion ?? ''].filter(Boolean).join(' ')}
+      style={delayMs ? { animationDelay: `${delayMs}ms` } : undefined}
+      aria-hidden="true"
+    />
+  );
 }
