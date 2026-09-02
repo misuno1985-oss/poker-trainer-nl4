@@ -25,9 +25,18 @@ export const BOARD_STAGGER_MS = 70;
 export const FOLD_MS = 210;
 export const CHIP_MS = 190;
 export const COLLECT_MS = 320;
-export const AWARD_MS = 360;
+/** Перелёт банка к победителю и золотая подсветка после него. */
+export const AWARD_MS = 380;
+export const HIGHLIGHT_MS = 950;
 export const REVEAL_MS = 190;
 export const BUTTON_MS = 220;
+
+/**
+ * Сколько длится финал раздачи целиком: перелёт банка плюс подсветка.
+ * Автопереход ждёт именно это время, чтобы новая раздача не наезжала на
+ * выдачу банка предыдущей.
+ */
+export const FINALE_TOTAL_MS = AWARD_MS + HIGHLIGHT_MS;
 
 /** Пауза перед сбором фишек и перед первой картой новой улицы. */
 const COLLECT_LEAD_MS = 120;
@@ -62,7 +71,7 @@ export type CueKind =
   | { type: 'fold'; seat: number }
   | { type: 'chips'; seat: number }
   | { type: 'collect' }
-  | { type: 'award'; seat: number }
+  | { type: 'award'; seats: number[] }
   | { type: 'reveal'; seat: number }
   | { type: 'button'; seat: number };
 
@@ -165,12 +174,11 @@ export function buildPlan(
     t += DEAL_STAGGER_MS;
   }
 
-  // 5. Банк уходит победителю.
-  if (next.finished && !previous.finished) {
-    for (const seat of next.winners) {
-      cues.push({ at: t, kind: { type: 'award', seat }, sound: 'win' });
-      break; // Один звук на раздачу, даже если банк делится.
-    }
+  // 5. Банк уходит победителю. При делёжке — всем сразу одним событием: и
+  // фишки едут к каждому, и звук один, а не по звуку на победителя.
+  if (next.finished && !previous.finished && next.winners.length > 0) {
+    const seats = [...new Set(next.winners)];
+    cues.push({ at: t, kind: { type: 'award', seats }, sound: 'win' });
   }
 
   return { cues, jump: false, reset: false };

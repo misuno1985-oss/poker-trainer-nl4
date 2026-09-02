@@ -185,7 +185,8 @@ describe('фишки', () => {
     ).cues;
     const award = find(cues, 'award');
     expect(award).toHaveLength(1);
-    expect(award[0].kind).toEqual({ type: 'award', seat: 4 });
+    // Место победителя — списком: при делёжке банк едет каждому.
+    expect(award[0].kind).toEqual({ type: 'award', seats: [4] });
     expect(award[0].sound).toBe('win');
   });
 
@@ -195,7 +196,10 @@ describe('фишки', () => {
       snap({ street: 'river', board: 5, finished: true, winners: [1, 4] }),
       SEATS,
     ).cues;
-    expect(find(cues, 'award')).toHaveLength(1);
+    // Одно событие на обоих: фишки едут каждому, а звук выигрыша один.
+    const award = find(cues, 'award');
+    expect(award).toHaveLength(1);
+    expect(award[0].kind).toEqual({ type: 'award', seats: [1, 4] });
   });
 });
 

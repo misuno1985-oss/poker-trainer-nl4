@@ -58,8 +58,8 @@ export default function App() {
       <Shell>
         <SummaryScreen
           totals={t.totals}
-          progress={t.progress}
-          sessionLog={t.sessionLog}
+          buildBundle={t.buildBundle}
+          archiveError={t.archiveError}
           onRestart={() => t.start(t.mode, t.stackMode)}
           onHome={() => t.goto('start')}
           onMistakes={() => t.goto('mistakes')}

@@ -18,6 +18,8 @@ import {
 } from '../app/progress';
 import type { LoggedDecision, LoggedHand, SessionLog } from '../app/sessionLog';
 import { AutoNext, browserTimer } from '../app/autoNext';
+import { makeExport, type Bundle } from '../app/exportBundle';
+import { saveSession } from '../app/sessionArchive';
 
 /** Пауза между ходами ботов — чтобы за столом читалось, кто что сделал. */
 const BOT_DELAY_MS = 560;
@@ -89,6 +91,10 @@ export interface Trainer {
   holdAutoNext: () => void;
   /** Полная запись сессии для выгрузки. */
   sessionLog: () => SessionLog;
+  /** Готовый файл выгрузки текущей сессии. */
+  buildBundle: () => Bundle;
+  /** Что случилось с архивом; null — всё в порядке. */
+  archiveError: string | null;
 }
 
 const HERO_NAME = 'withorwithout';
@@ -130,6 +136,7 @@ export function useTrainer(): Trainer {
   const hands = useRef<LoggedHand[]>([]);
   const currentHand = useRef<LoggedHand | null>(null);
   const replayCounts = useRef(new Map<number, number>());
+  const archiveError = useRef<string | null>(null);
 
   if (session.current === null) {
     session.current = newSession({
@@ -467,6 +474,50 @@ export function useTrainer(): Trainer {
     }, 0);
   }, [closeHand]);
 
+  /* ---------------- выгрузка и архив ---------------- */
+
+  const currentLog = useCallback((): SessionLog => {
+    const m = mode.current;
+    return {
+      id: sessionId.current || `s${sessionStartedAt.current.toString(36)}`,
+      mode: m.kind,
+      modeDetail: m.category ?? m.villain ?? null,
+      targetHands: m.handLimit ?? null,
+      startedAt: sessionStartedAt.current,
+      endedAt: Date.now(),
+      smallBlindCents: session.current!.config.smallBlind,
+      bigBlindCents: session.current!.config.bigBlind,
+      heroName: HERO_NAME,
+      hands: hands.current,
+    };
+  }, []);
+
+  const bundle = useCallback(
+    () => makeExport(currentLog(), totalsOf(sessionRecords.current, handsPlayed.current, netTotal.current), progress.current),
+    [currentLog],
+  );
+
+  /**
+   * Положить законченную сессию в архив.
+   *
+   * Ошибка здесь ничего не ломает: текущая раздача и выгрузка «прямо сейчас»
+   * от архива не зависят — файл собирается из памяти.
+   */
+  const archiveNow = useCallback(() => {
+    let record;
+    try {
+      record = bundle().record;
+    } catch {
+      archiveError.current = 'Не удалось собрать файл сессии для архива.';
+      force();
+      return;
+    }
+    void saveSession(record).then((result) => {
+      archiveError.current = result.ok ? null : (result.error ?? 'Архив недоступен.');
+      force();
+    });
+  }, [bundle]);
+
   /* ---------------- переигрывание ---------------- */
 
   const replayFrom = useCallback((setup: HandSetup, actions: ActionRequest[]) => {
@@ -502,6 +553,7 @@ export function useTrainer(): Trainer {
     isReplay: isReplay.current,
     sessionComplete: mode.current.handLimit !== undefined
       && handsPlayed.current >= mode.current.handLimit,
+    archiveError: archiveError.current,
     pauseNext: auto.current!.isPaused,
     autoNextIn: auto.current!.remaining,
     totals: totalsOf(sessionRecords.current, handsPlayed.current, netTotal.current),
@@ -528,6 +580,7 @@ export function useTrainer(): Trainer {
       hands.current = [];
       currentHand.current = null;
       replayCounts.current = new Map();
+      archiveError.current = null;
       sessionId.current = `s${Date.now().toString(36)}`;
       sessionStartedAt.current = Date.now();
       screen.current = 'table';
@@ -558,21 +611,8 @@ export function useTrainer(): Trainer {
       force();
     },
 
-    sessionLog(): SessionLog {
-      const m = mode.current;
-      return {
-        id: sessionId.current || `s${sessionStartedAt.current.toString(36)}`,
-        mode: m.kind,
-        modeDetail: m.category ?? m.villain ?? null,
-        targetHands: m.handLimit ?? null,
-        startedAt: sessionStartedAt.current,
-        endedAt: Date.now(),
-        smallBlindCents: session.current!.config.smallBlind,
-        bigBlindCents: session.current!.config.bigBlind,
-        heroName: HERO_NAME,
-        hands: hands.current,
-      };
-    },
+    sessionLog: currentLog,
+    buildBundle: bundle,
 
     replayExact() {
       if (currentSetup.current) replayFrom(currentSetup.current, heroActions.current.slice());
@@ -601,6 +641,11 @@ export function useTrainer(): Trainer {
       if (!(limit && handsPlayed.current >= limit)) recordSession();
       screen.current = 'summary';
       force();
+
+      // Архив пишется здесь, а не в момент последней раздачи: разбор
+      // последнего решения считается следующим кадром, и раньше него в файл
+      // попала бы неполная сессия. К этому моменту всё уже посчитано.
+      if (hands.current.some((h) => !h.isReplay)) archiveNow();
     },
 
     wipeProgress() {

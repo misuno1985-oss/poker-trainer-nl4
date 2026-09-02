@@ -3,7 +3,7 @@ import type { Session } from '../app/session';
 import { SEATS } from '../app/session';
 import { armAudioUnlock, audio } from '../audio';
 import {
-  AWARD_MS, CHIP_MS, COLLECT_MS, FOLD_MS, REVEAL_MS,
+  AWARD_MS, CHIP_MS, COLLECT_MS, FOLD_MS, HIGHLIGHT_MS, REVEAL_MS,
   buildPlan, dealOrder, type Cue, type TableSnapshot,
 } from './tableTimeline';
 
@@ -28,8 +28,10 @@ export interface TableAnim {
   chips: number[];
   /** Фишки едут в банк. */
   collecting: boolean;
-  /** Кому вручают банк. */
-  awarding: number | null;
+  /** Кому едут фишки банка прямо сейчас. */
+  awarding: number[];
+  /** Кто подсвечен золотым как победитель. */
+  winners: number[];
   /** Места, чьи карты сейчас раскрываются. */
   revealing: number[];
   /** Где лежит кнопка дилера. */
@@ -49,7 +51,7 @@ export interface TableAnim {
 function emptyAnim(button: number): TableAnim {
   return {
     boardShown: 0, dealt: [], folding: [], chips: [],
-    collecting: false, awarding: null, revealing: [], button,
+    collecting: false, awarding: [], winners: [], revealing: [], button,
     entering: [], boardEntering: [],
   };
 }
@@ -86,7 +88,8 @@ function instant(snap: TableSnapshot): TableAnim {
     folding: [],
     chips: [],
     collecting: false,
-    awarding: null,
+    awarding: [],
+    winners: [],
     revealing: [],
     button: snap.button,
     // Прыжок — значит без анимаций входа.
@@ -174,7 +177,9 @@ function apply(cur: TableAnim, cue: Cue, snap: TableSnapshot): TableAnim {
     case 'collect':
       return { ...cur, collecting: true };
     case 'award':
-      return { ...cur, awarding: cue.kind.seat };
+      // Фишки едут и подсветка загорается одним событием: к моменту, когда
+      // банк доехал, победитель уже светится.
+      return { ...cur, awarding: cue.kind.seats, winners: cue.kind.seats };
     case 'reveal':
       return { ...cur, revealing: [...cur.revealing, cue.kind.seat] };
     case 'button':
@@ -209,7 +214,10 @@ function scheduleEnd(
       after(COLLECT_MS, () => setAnim((c) => ({ ...c, collecting: false })));
       break;
     case 'award':
-      after(AWARD_MS, () => setAnim((c) => ({ ...c, awarding: null })));
+      // Фишки убираются, как только доехали, а подсветка живёт чуть дольше —
+      // но обязательно гаснет сама, без вечного золотого свечения.
+      after(AWARD_MS, () => setAnim((c) => ({ ...c, awarding: [] })));
+      after(AWARD_MS + HIGHLIGHT_MS, () => setAnim((c) => ({ ...c, winners: [] })));
       break;
     case 'reveal': {
       const seat = cue.kind.seat;

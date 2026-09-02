@@ -915,14 +915,34 @@
 
 .card-reveal { animation: card-reveal 190ms ease-out both; }
 
-/* Место, которому достался банк, коротко подсвечивается. */
-@keyframes seat-awarded {
+/* Победитель: мягкая золотая подсветка таблички, стека и карт — без вспышек,
+   баннеров и прочего казино. Гаснет сама. */
+@keyframes seat-winner {
   0%   { box-shadow: 0 0 0 0 rgba(240, 192, 90, 0); }
-  35%  { box-shadow: 0 0 0 4px rgba(240, 192, 90, 0.45); }
+  25%  { box-shadow: 0 0 0 2px rgba(240, 192, 90, 0.5), 0 0 16px rgba(240, 192, 90, 0.28); }
+  70%  { box-shadow: 0 0 0 2px rgba(240, 192, 90, 0.42), 0 0 14px rgba(240, 192, 90, 0.2); }
   100% { box-shadow: 0 0 0 0 rgba(240, 192, 90, 0); }
 }
 
-.seat-awarded .seat-plate { animation: seat-awarded 360ms ease-out both; }
+@keyframes cards-winner {
+  0%   { filter: none; }
+  25%  { filter: brightness(1.1) drop-shadow(0 0 7px rgba(240, 192, 90, 0.5)); }
+  70%  { filter: brightness(1.08) drop-shadow(0 0 6px rgba(240, 192, 90, 0.38)); }
+  100% { filter: none; }
+}
+
+.seat-winner .seat-plate { animation: seat-winner 950ms ease-out both; }
+.seat-winner .seat-cards { animation: cards-winner 950ms ease-out both; }
+
+/* Банк уезжает победителю: стартует в центре, доезжает до его места и гаснет. */
+.pot-award {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 4;
+  transition: left 380ms ease-out, top 380ms ease-out, opacity 380ms ease-in;
+}
+.pot-award .bet-marker { position: static; transform: none; }
 
 /* Фишки приезжают от игрока к своему маркеру. Направление — от места к
    центру, то есть обратное тому, куда смотрит маркер. */
@@ -976,12 +996,16 @@
 
 @media (prefers-reduced-motion: reduce) {
   /* Движение выключено, но состояние всё равно меняется — и звук остаётся. */
-  .card-deal, .card-deal-board, .card-muck, .card-reveal,
-  .bet-arriving, .seat-awarded .seat-plate {
+  .card-deal, .card-deal-board, .card-muck, .card-reveal, .bet-arriving {
     animation-duration: 1ms;
     animation-delay: 0ms;
   }
   .dealer-button { transition: none; }
+  /* Банк не летит через стол, а просто исчезает. Подсветка победителя
+     остаётся — она не движение, а состояние, — только совсем мягкая. */
+  .pot-award { transition: opacity 120ms linear; }
+  .seat-winner .seat-plate,
+  .seat-winner .seat-cards { animation-duration: 400ms; }
 }
 
 /* ---------------- автопереход между раздачами ---------------- */
@@ -1014,4 +1038,42 @@
   font-size: 11.5px;
   color: var(--muted);
   text-align: center;
+}
+
+/* ---------------- архив сессий ---------------- */
+
+/* «Сыграно N сессий» — не украшение, а ссылка в архив. */
+.stats-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--text);
+  cursor: pointer;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.28);
+}
+.stats-link:hover { color: var(--accent); border-bottom-color: var(--accent); }
+.stats-link-arrow { margin-left: 5px; font-size: 0.9em; opacity: 0.7; }
+
+.archive-modal { max-width: 520px; }
+
+.archive-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.archive-row:last-of-type { border-bottom: none; }
+
+.archive-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.archive-when { font-size: 12.5px; font-weight: 600; }
+.archive-mode { font-size: 11.5px; color: var(--muted); }
+.archive-numbers { font-size: 12px; font-variant-numeric: tabular-nums; }
+.archive-row .btn { flex: 0 0 auto; }
+
+@media (max-width: 900px) {
+  .archive-row { flex-wrap: wrap; }
+  .archive-row .btn { width: 100%; }
 }

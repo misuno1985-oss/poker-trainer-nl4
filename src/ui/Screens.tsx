@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { money, type StackMode } from '../game/stacks';
 import { CardText } from './CardText';
 import { ALL_CATEGORIES, CATEGORY_HINTS, CATEGORY_TITLES, type CategoryId } from '../coach/categories';
 import { buildSessionSummary } from '../coach/summary';
-import { buildExport, exportFileName, type SessionLog } from '../app/sessionLog';
 import { downloadJson } from '../app/download';
-import { PROFILES } from '../bots/profiles';
+import { listSessions, loadSession, type ArchiveMeta } from '../app/sessionArchive';
+import type { Bundle } from '../app/exportBundle';
 import { VILLAIN_NAMES, type TrainerMode } from '../app/trainer';
 import {
   MIN_FOR_TREND, averageScore, tally, trendFor, versusTable, type Progress,
@@ -25,6 +25,21 @@ function plural(n: number, one: string, few: string, many: string): string {
 
 const hands = (n: number) => plural(n, 'раздача', 'раздачи', 'раздач');
 const decisions = (n: number) => plural(n, 'решение', 'решения', 'решений');
+const sessions = (n: number) => plural(n, 'сессия', 'сессии', 'сессий');
+
+const MODE_LABEL: Record<string, string> = {
+  session: 'Обычная',
+  quick: 'Свободная',
+  'weak-spot': 'Слабое место',
+  versus: 'Против игрока',
+};
+
+/** «02.09.2026 22:14» — так, как это пишут в списке. */
+function stamp(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getDate())}.${p(d.getMonth() + 1)}.${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 
 /* ================================================================== */
 /* Стартовый экран                                                     */
@@ -40,8 +55,10 @@ interface StartProps {
 export function StartScreen({ progress, onStart, onProgress, onMistakes }: StartProps) {
   const [stacks, setStacks] = useState<StackMode>('standard');
   const [picking, setPicking] = useState<'none' | 'weak' | 'versus'>('none');
+  const [archive, setArchive] = useState(false);
 
   const overall = averageScore(progress.decisions);
+  const played = progress.sessions.length;
 
   return (
     <div className="start">
@@ -49,11 +66,26 @@ export function StartScreen({ progress, onStart, onProgress, onMistakes }: Start
         <h2>Что тренируем</h2>
         {progress.decisions.length > 0 && (
           <p className="start-stats">
-            Сыграно {hands(progress.hands)} · {decisions(progress.decisions.length)}
+            {played > 0 ? (
+              <button
+                type="button"
+                className="stats-link"
+                onClick={() => setArchive(true)}
+                title="Последние сессии — можно скачать файл для разбора"
+              >
+                Сыграно {sessions(played)}
+                <span className="stats-link-arrow" aria-hidden="true">→</span>
+              </button>
+            ) : (
+              <>Сыграно {hands(progress.hands)}</>
+            )}
+            {' · '}{decisions(progress.decisions.length)}
             {overall !== null && ` · средняя оценка ${overall.toFixed(1)}`}
           </p>
         )}
       </div>
+
+      {archive && <ArchiveModal onClose={() => setArchive(false)} />}
 
       <div className="start-stacks">
         <span className="hero-picker-label">Стеки</span>
@@ -155,14 +187,105 @@ function ModeCard({ title, hint, onClick, primary }: {
   );
 }
 
+
+/* ================================================================== */
+/* Последние сессии                                                    */
+/* ================================================================== */
+
+/**
+ * Окно архива. Главная его задача одна: найти недавнюю сессию и снова скачать
+ * её полный файл — тот же самый, что скачался бы сразу после игры.
+ */
+function ArchiveModal({ onClose }: { onClose: () => void }) {
+  const [rows, setRows] = useState<ArchiveMeta[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    void listSessions().then((list) => { if (alive) setRows(list); });
+    return () => { alive = false; };
+  }, []);
+
+  const download = async (row: ArchiveMeta) => {
+    setBusy(row.id);
+    setFailed(null);
+    const payload = await loadSession(row.id);
+    setBusy(null);
+    if (!payload) {
+      setFailed('Файл этой сессии больше недоступен.');
+      return;
+    }
+    downloadJson(row.fileName, payload);
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal archive-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <h2>Последние сессии</h2>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>Закрыть</button>
+        </div>
+
+        {rows === null && <p className="fineprint">Читаю архив…</p>}
+
+        {rows !== null && rows.length === 0 && (
+          <p className="empty">
+            Архив пока пуст. Сюда попадают законченные сессии — по пять последних,
+            каждая целиком, вместе с разбором каждого решения.
+          </p>
+        )}
+
+        {rows !== null && rows.map((row) => (
+          <div key={row.id} className="archive-row">
+            <div className="archive-info">
+              <span className="archive-when">{stamp(row.endedAt)}</span>
+              <span className="archive-mode">
+                {MODE_LABEL[row.mode] ?? row.mode}
+                {row.modeDetail && ` · ${CATEGORY_TITLES[row.modeDetail as CategoryId] ?? row.modeDetail}`}
+                {` · ${hands(row.hands)}`}
+              </span>
+              <span className="archive-numbers">
+                Оценка {row.decisionScore.toFixed(1)}
+                {' · '}
+                <span className={row.netCents >= 0 ? 'good' : 'bad'}>
+                  {row.netCents >= 0 ? '+' : ''}{money(row.netCents)}
+                </span>
+                {row.majorMistakes > 0 && ` · крупных ошибок ${row.majorMistakes}`}
+              </span>
+            </div>
+            <button
+              type="button"
+              className="btn btn-outline"
+              disabled={busy === row.id}
+              onClick={() => void download(row)}
+            >
+              {busy === row.id ? 'Готовлю…' : 'СКАЧАТЬ'}
+            </button>
+          </div>
+        ))}
+
+        {failed && <p className="fineprint bad">{failed}</p>}
+
+        {rows !== null && rows.length > 0 && (
+          <p className="fineprint">
+            Хранятся пять последних. Каждый файл — полный: раздачи, ходы, твои решения
+            и весь разбор тренера.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ================================================================== */
 /* Итог сессии                                                         */
 /* ================================================================== */
 
-export function SummaryScreen({ totals, progress, sessionLog, onRestart, onHome, onMistakes }: {
+export function SummaryScreen({ totals, buildBundle, archiveError, onRestart, onHome, onMistakes }: {
   totals: SessionTotals;
-  progress: Progress;
-  sessionLog: () => SessionLog;
+  buildBundle: () => Bundle;
+  archiveError: string | null;
   onRestart: () => void;
   onHome: () => void;
   onMistakes: () => void;
@@ -254,13 +377,11 @@ export function SummaryScreen({ totals, progress, sessionLog, onRestart, onHome,
           type="button"
           className="btn btn-outline"
           onClick={() => {
-            const log = sessionLog();
-            const now = Date.now();
-            const name = exportFileName(log, now);
-            // Только данные тренажёра: ни настроек, ни хранилища, ни чего-либо
-            // ещё со страницы.
-            downloadJson(name, buildExport(log, summaryInput(totals, summary, progress, log), PROFILES, now));
-            setSaved(name);
+            // Тот же сборщик, что кладёт сессию в архив: файл «сейчас» и файл
+            // «через три дня» собираются одним кодом.
+            const { fileName, payload } = buildBundle();
+            downloadJson(fileName, payload);
+            setSaved(fileName);
           }}
         >
           ВЫГРУЗИТЬ СЕССИЮ
@@ -275,61 +396,16 @@ export function SummaryScreen({ totals, progress, sessionLog, onRestart, onHome,
           что видел тренер и что он посчитал. Его можно отдать на разбор кому угодно.
         </p>
       )}
+
+      <p className="fineprint">
+        {archiveError
+          ? `${archiveError} Скачать файл прямо сейчас это не мешает.`
+          : 'Эта сессия сохранена в архиве — её можно будет скачать позже с главного экрана.'}
+      </p>
     </div>
   );
 }
 
-
-/**
- * Данные итога для выгрузки — ровно те, что показаны на экране.
- * Ничего не пересчитывается: цифры берутся из уже готового итога.
- */
-function summaryInput(
-  totals: SessionTotals,
-  summary: ReturnType<typeof buildSessionSummary>,
-  progress: Progress,
-  log: SessionLog,
-) {
-  const handOf = new Map<number, number>();
-  for (const h of log.hands) {
-    if (h.isReplay) continue;
-    for (const d of h.decisions) handOf.set(d.atMs, h.handNumber);
-  }
-
-  return {
-    decisionScore: Number(totals.score.toFixed(2)),
-    netCents: totals.net,
-    good: totals.good,
-    borderline: totals.borderline,
-    mistakes: totals.mistakes,
-    major: totals.major,
-    insights: summary.insights,
-    focus: summary.focus,
-    focusReason: summary.focusReason,
-    categories: ALL_CATEGORIES.map((c) => {
-      const t = tallyOf(totals, c);
-      return { id: c, title: CATEGORY_TITLES[c], total: t.total, good: t.good, mistakes: t.mistakes };
-    }).filter((c) => c.total > 0),
-    // Крупные ошибки именно этой сессии: у них есть зерно раздачи из журнала.
-    majorMistakes: progress.mistakes
-      .filter((m) => log.hands.some((h) => !h.isReplay && h.setup.seed === m.setup.seed))
-      .map((m) => ({
-        handNumber: m.setup.handNumber,
-        street: m.street,
-        scoreValue: m.score,
-        heroCards: m.heroCards.map(cardLabel),
-        board: m.board.map(cardLabel),
-        position: m.position,
-        villain: m.villain,
-        did: m.did,
-        better: m.better,
-      })),
-  };
-}
-
-const RANK_TEXT = '23456789TJQKA';
-const SUIT_TEXT = 'cdhs';
-const cardLabel = (c: number) => (c < 0 ? '' : RANK_TEXT[c >> 2] + SUIT_TEXT[c & 3]);
 
 function tallyOf(totals: SessionTotals, c: CategoryId) {
   return tally(

@@ -9,6 +9,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { AUTO_NEXT_MS, AutoNext, FINALE_MS, TOTAL_DELAY_MS, type Timer } from '../src/app/autoNext';
+import { AWARD_MS, HIGHLIGHT_MS } from '../src/ui/tableTimeline';
 
 /** Управляемое время: ничего не происходит само, пока не сдвинешь часы. */
 function fakeTimer() {
@@ -70,6 +71,16 @@ describe('обычный ход', () => {
   it('пауза заметная, но не утомительная', () => {
     expect(TOTAL_DELAY_MS).toBeGreaterThanOrEqual(1500);
     expect(TOTAL_DELAY_MS).toBeLessThanOrEqual(3000);
+  });
+
+  it('следующая раздача ждёт, пока банк доедет до победителя', () => {
+    // Отсчёт не начинается, пока фишки в пути.
+    expect(FINALE_MS).toBeGreaterThan(AWARD_MS);
+  });
+
+  it('и ждёт, пока догорит золотая подсветка победителя', () => {
+    // Иначе новая сдача накладывалась бы на финал прошлой руки.
+    expect(TOTAL_DELAY_MS).toBeGreaterThan(AWARD_MS + HIGHLIGHT_MS);
   });
 
   it('видно, сколько осталось', () => {

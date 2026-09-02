@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { PlayingCard, CardBack } from './PlayingCard';
 import { BetMarker } from './BetMarker';
 import { DealerButton, dealerSpot } from './DealerButton';
-import { TABLE_CENTER, betSpots, type BetSpot } from './betMarkers';
+import { TABLE_CENTER, betSpots, chipCount, type BetSpot } from './betMarkers';
 import { useTableFit } from './useTableFit';
 import { DEAL_STAGGER_MS } from './tableTimeline';
 import type { TableAnim } from './useTableTimeline';
@@ -74,6 +74,7 @@ export function Table({ session, narrow, showAllCards, anim, onInfo }: Props) {
   // самое и точнее, поэтому подпись героя уступает ему место.
   const heroHasMarker = spots.some((s2) => s2.seat === HERO_SEAT);
   const flying = useCollectAnimation(spots, anim.collecting);
+  const award = useAwardAnimation(anim.awarding, coords, state, pot);
   const streetLabel = { preflop: 'PREFLOP', flop: 'FLOP', turn: 'TURN', river: 'RIVER', showdown: 'SHOWDOWN' }[state.street];
 
   return (
@@ -122,6 +123,14 @@ export function Table({ session, narrow, showAllCards, anim, onInfo }: Props) {
         <BetMarker key={`fly-${s2.seat}`} spot={s2} flying />
       ))}
 
+      {/* Банк уезжает победителю. Стек ему уже начислил движок — это только
+          показ выдачи, а при делёжке банк едет к каждому своей стопкой. */}
+      {award.map((a) => (
+        <div key={`award-${a.seat}`} className="pot-award" style={a.style}>
+          <BetMarker spot={a.spot} />
+        </div>
+      ))}
+
       <DealerButton spot={dealerSpot(coords[anim.button], narrow, anim.button === HERO_SEAT)} />
 
       {views.map((v) => (
@@ -138,7 +147,7 @@ export function Table({ session, narrow, showAllCards, anim, onInfo }: Props) {
           entering={anim.entering.includes(v.seat)}
           folding={anim.folding.includes(v.seat)}
           revealing={anim.revealing.includes(v.seat)}
-          awarded={anim.awarding === v.seat}
+          winner={anim.winners.includes(v.seat)}
           handKey={session.handNumber}
           onInfo={onInfo}
         />
@@ -161,13 +170,14 @@ interface SeatProps {
   entering: boolean;
   folding: boolean;
   revealing: boolean;
-  awarded: boolean;
+  /** Победитель: мягкая золотая подсветка таблички, стека и карт. */
+  winner: boolean;
   handKey: number;
   onInfo: (name: string) => void;
 }
 
 function SeatBox({
-  view, x, y, narrow, reveal, hideAction, dealtAt, entering, folding, revealing, awarded, handKey, onInfo,
+  view, x, y, narrow, reveal, hideAction, dealtAt, entering, folding, revealing, winner, handKey, onInfo,
 }: SeatProps) {
   const classes = [
     'seat',
@@ -176,7 +186,7 @@ function SeatBox({
     // раньше, чем карты доедут.
     view.folded && !folding ? 'seat-folded' : '',
     view.isToAct ? 'seat-active' : '',
-    awarded ? 'seat-awarded' : '',
+    winner ? 'seat-winner' : '',
   ].filter(Boolean).join(' ');
 
   // Карты видно, когда дилер до этого места дошёл, и пока они не уехали в мак.
@@ -251,6 +261,58 @@ function SeatBox({
       {!view.isHero && label}
     </div>
   );
+}
+
+
+/**
+ * Перелёт банка к победителю.
+ *
+ * Стопка стартует из центра стола и уезжает к месту победителя — по тому же
+ * направлению, что и всё остальное движение на столе. При делёжке банк
+ * делится на равные стопки, по одной каждому: точность до цента здесь не
+ * нужна, нужно, чтобы было видно, что банк разделили.
+ *
+ * Деньги при этом не считаются заново: сумма берётся из уже посчитанного
+ * банка, а стеки давно проставил движок.
+ */
+function useAwardAnimation(
+  winners: number[],
+  coords: readonly { x: number; y: number }[],
+  state: Session['state'],
+  pot: number,
+) {
+  const [go, setGo] = useState(false);
+
+  useEffect(() => {
+    if (winners.length === 0) { setGo(false); return; }
+    // Второй кадр: сначала отрисовать стопку в центре, потом отправить в путь.
+    const raf = requestAnimationFrame(() => setGo(true));
+    return () => cancelAnimationFrame(raf);
+  }, [winners.join(',')]);
+
+  if (winners.length === 0) return [];
+
+  const share = Math.max(1, Math.round(pot / winners.length));
+  return winners.map((seat) => {
+    const to = coords[seat];
+    return {
+      seat,
+      style: {
+        left: go ? `${TABLE_CENTER.x + (to.x - TABLE_CENTER.x) * 0.72}%` : `${TABLE_CENTER.x}%`,
+        top: go ? `${TABLE_CENTER.y + (to.y - TABLE_CENTER.y) * 0.72}%` : `${TABLE_CENTER.y}%`,
+        opacity: go ? 0 : 1,
+      } as React.CSSProperties,
+      spot: {
+        seat,
+        x: 0,
+        y: 0,
+        amount: share,
+        chips: chipCount(share, state.bigBlind),
+        folded: false,
+        allIn: false,
+      },
+    };
+  });
 }
 
 /**

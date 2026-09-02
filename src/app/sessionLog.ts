@@ -20,7 +20,7 @@ import type { HandSetup } from './session';
 import type { ModeKind } from './trainer';
 
 export const SCHEMA_VERSION = 1;
-export const APP_VERSION = '1.0.5';
+export const APP_VERSION = '1.0.6';
 
 /* ------------------------------------------------------------------ */
 /* Что накапливается по ходу сессии                                    */
